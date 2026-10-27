@@ -1,0 +1,33 @@
+{
+  "engine": "TestRules",
+  "description": "DSL 컴파일 검증용",
+  "actions": [
+    {
+      "type": "Summon",
+      "card": 0,
+      "note": "상대 몬스터가 있으면 아무 몬스터나 일반 소환",
+      "conditions": [
+        { "kind": "enemyMonsterCount", "op": ">=", "value": 1, "side": "enemy" }
+      ]
+    },
+    {
+      "type": "Activate",
+      "card": 14558127,
+      "note": "상대 패에 특정 카드가 있으면 발동",
+      "conditions": [
+        { "kind": "hasInHand", "side": "enemy", "card": 23434538, "op": ">=", "value": 0 }
+      ]
+    },
+    {
+      "type": "GoToBattlePhase",
+      "note": "상대 필드가 비면 배틀 페이즈",
+      "conditions": [
+        { "kind": "enemyFieldEmpty", "op": ">=", "value": 0 }
+      ]
+    }
+  ],
+  "choices": [
+    { "on": "SelectCard", "pick": "enemyHighestAttack" },
+    { "on": "SelectYesNo", "yesNo": true }
+  ]
+}

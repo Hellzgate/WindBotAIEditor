@@ -1,0 +1,31 @@
+<UserControl x:Class="WindBotAIEditor.Controls.CardNameBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontSize="13">
+    <Grid>
+        <TextBox x:Name="Txt" Padding="4,3" BorderThickness="1" Style="{DynamicResource ThemedTextBox}"
+                 VerticalContentAlignment="Center"
+                 TextChanged="OnTextChanged"
+                 PreviewKeyDown="OnPreviewKeyDown"
+                 LostFocus="OnLostFocus" GotFocus="OnGotFocus"/>
+        <Popup x:Name="Pop" PlacementTarget="{Binding ElementName=Txt}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+            <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,2,0,0"
+                    Width="{Binding ActualWidth, ElementName=Txt}" MaxHeight="240">
+                <ListBox x:Name="Lst" BorderThickness="0" Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextFg}"
+                         MouseLeftButtonUp="OnItemClick" PreviewKeyDown="OnListKeyDown">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}" Width="190" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFg}"/>
+                                <TextBlock Text="{Binding Id}" Foreground="{DynamicResource SubtleFg}" FontSize="11"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>
+
+

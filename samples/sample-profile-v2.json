@@ -1,0 +1,33 @@
+{
+  "engine": "TestRules2",
+  "description": "schema v2 — OR 조건 + 소재/릴리스 선택 + 카드별 대상 지정",
+  "actions": [
+    {
+      "type": "Summon",
+      "card": 0,
+      "note": "상대 몬스터가 2마리 이상이거나 상대 LP가 3000 이하일 때 일반 소환",
+      "conditions": [
+        { "kind": "enemyMonsterCount", "op": ">=", "value": 2, "join": "and" },
+        { "kind": "enemyLp", "op": "<=", "value": 3000, "join": "or" }
+      ]
+    },
+    {
+      "type": "Activate",
+      "card": 14558127,
+      "note": "패/묘지 조건 OR",
+      "conditions": [
+        { "kind": "hasInHand", "side": "enemy", "card": 23434538, "join": "and" },
+        { "kind": "hasInGraveyard", "side": "me", "card": 14558127, "join": "or" }
+      ]
+    },
+    { "type": "GoToBattlePhase", "note": "직공 가능", "conditions": [{ "kind": "enemyHasNoMonster", "op": ">=", "value": 0 }] }
+  ],
+  "choices": [
+    { "on": "SelectCard", "pick": "enemyHighestAttack", "whenCard": 14558127 },
+    { "on": "SelectCard", "pick": "firstAvailable" },
+    { "on": "SelectSum", "pick": "lowestLevel" },
+    { "on": "FusionMaterial", "pick": "enemyHighestAttack", "card": 89631139 },
+    { "on": "XyzMaterial", "pick": "lowestLevel" },
+    { "on": "SelectYesNo", "yesNo": true }
+  ]
+}

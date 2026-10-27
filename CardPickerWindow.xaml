@@ -1,0 +1,33 @@
+<Window x:Class="WindBotAIEditor.CardPickerWindow"
+        Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextFg}"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="카드 선택 — 이름으로 검색" Height="560" Width="760"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FontFamily="Malgun Gothic" FontSize="13">
+    <DockPanel Margin="10">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBox x:Name="TxtKeyword" Width="360" Padding="4" KeyDown="OnKeyDown"/>
+            <Button Content="검색" Padding="14,2" Margin="6,0,0,0" Click="OnSearch"/>
+            <TextBlock x:Name="LblInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource SubtleFg}"/>
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button Content="선택" Padding="18,4" IsDefault="True" Click="OnOk"/>
+            <Button Content="취소" Padding="18,4" Margin="8,0,0,0" IsCancel="True"/>
+        </StackPanel>
+
+        <DataGrid x:Name="GridResults" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" RowHeight="24" MouseDoubleClick="OnDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="95"/>
+                <DataGridTextColumn Header="카드명" Binding="{Binding Name}" Width="*"/>
+                <DataGridTextColumn Header="공격" Binding="{Binding Atk}" Width="65"/>
+                <DataGridTextColumn Header="수비" Binding="{Binding Def}" Width="65"/>
+                <DataGridTextColumn Header="출처" Binding="{Binding Source}" Width="150"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>
+
+

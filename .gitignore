@@ -1,0 +1,19 @@
+# 빌드 산출물
+bin/
+obj/
+*.pdb
+
+# IDE
+.vs/
+*.user
+*.suo
+.vscode/
+
+# 배포/백업 (저장소에는 소스만)
+dist/
+_backups/
+*.zip
+
+# 임시
+*.log
+*.tmp
