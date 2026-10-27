@@ -122,6 +122,30 @@ public partial class App : Application
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
 
+            // B-15: 자유 플레이 마법/함정 세트
+            total = problems.Count;
+            problems.AddRange(w.VerifyFreePlaySetUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // B-16: 자유 플레이 엑스트라 덱 몬스터 릴리스 금지
+            total = problems.Count;
+            problems.AddRange(w.VerifyProtectExtraUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // B-17: 선택 정책 "발동 중인 카드(체인)"
+            total = problems.Count;
+            problems.AddRange(w.VerifyChainPickUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // B-18: 자유 플레이 제물 여력 가드
+            total = problems.Count;
+            problems.AddRange(w.VerifyTributeFodderUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
             Console.WriteLine(problems.Count == 0 ? "UICHECK OK" : "UICHECK FAIL " + problems.Count);
             Console.WriteLine("tabs=" + w.MainTabCount +
                               " ruleSubTabs=" + w.RuleSubTabCount +
@@ -141,6 +165,11 @@ public partial class App : Application
                               " (1100x700) / routeListH=" + Math.Round(w.RouteListHeightDefault) +
                               " stepsH=" + Math.Round(w.StepsHeightDefault) + " (1560x1000)");
             Console.WriteLine("trackBtn " + w.TrackButtonMetrics);
+            Console.WriteLine("b14 " + w.B14Metrics);
+            Console.WriteLine("b15 " + w.B15Metrics);
+            Console.WriteLine("b16 " + w.B16Metrics);
+            Console.WriteLine("b17 " + w.B17Metrics);
+            Console.WriteLine("b18 " + w.B18Metrics);
             Console.WriteLine("profile=" + (profilePath == null ? "(없음)" : Path.GetFileName(profilePath) + (loaded ? " OK" : " FAIL")) +
                               " summary=\"" + w.RuleSummaryText + "\"");
             return problems.Count == 0 ? 0 : 1;
@@ -267,7 +296,8 @@ public partial class App : Application
             Console.WriteLine("before: legacyRoute=" + (p.Route == null ? "null" : p.Route.Count.ToString()) +
                               " legacyRouteSecond=" + (p.RouteSecond == null ? "null" : p.RouteSecond.Count.ToString()) +
                               " routes=" + p.Routes.Count + " routesSecond=" + p.RoutesSecond.Count +
-                              " choices=" + (p.Choices == null ? 0 : p.Choices.Count) + " choiceConds=" + ChoiceCondTotal(p));
+                              " choices=" + (p.Choices == null ? 0 : p.Choices.Count) + " choiceConds=" + ChoiceCondTotal(p) +
+                              " sameNameAliases=" + p.SameNameAliases);
 
             RuleMigration.Normalize(p);
             Console.WriteLine("after:  routes=" + ProfileSummary(p.Routes) + " routesSecond=" + ProfileSummary(p.RoutesSecond));
@@ -282,13 +312,15 @@ public partial class App : Application
             if (back == null) { Console.Error.WriteLine("재읽기 실패: " + outPath); return 3; }
             RuleMigration.Normalize(back);
             Console.WriteLine("reload: routes=" + ProfileSummary(back.Routes) + " routesSecond=" + ProfileSummary(back.RoutesSecond) +
-                              " choices=" + (back.Choices == null ? 0 : back.Choices.Count) + " choiceConds=" + ChoiceCondTotal(back));
+                              " choices=" + (back.Choices == null ? 0 : back.Choices.Count) + " choiceConds=" + ChoiceCondTotal(back) +
+                              " sameNameAliases=" + back.SameNameAliases + " hasKey=" + saved.Contains("\"sameNameAliases\":"));
 
             var ok = back.Routes.Count == p.Routes.Count
                      && back.RoutesSecond.Count == p.RoutesSecond.Count
                      && back.Routes.Sum(s => s.Steps.Count) == p.Routes.Sum(s => s.Steps.Count)
                      && back.RoutesSecond.Sum(s => s.Steps.Count) == p.RoutesSecond.Sum(s => s.Steps.Count)
                      && ChoiceCondTotal(back) == ChoiceCondTotal(p)
+                     && back.SameNameAliases == p.SameNameAliases
                      && back.Routes.Zip(p.Routes).All(z => z.First.IsDefault == z.Second.IsDefault
                                                           && z.First.Conditions.Count == z.Second.Conditions.Count);
 
@@ -361,6 +393,11 @@ public partial class App : Application
         foreach (var r in rows) Console.WriteLine($"  hit {r.Id} {r.Name} [{r.Source}]");
         Console.WriteLine("name(89631139)=" + CardDatabase.Instance.NameOf(89631139));
         Console.WriteLine("idOf(푸른 눈의 백룡)=" + CardDatabase.Instance.FindIdByName("푸른 눈의 백룡"));
+        // B-12: 같은 이름 카드(대체 일러/재록) 그룹
+        var ogre = CardDatabase.Instance.AliasesOf(59438930);
+        Console.WriteLine("aliases(59438930)=" + string.Join(", ", ogre.Select(x => x.ToString()).ToArray()) +
+                          "  name=" + CardDatabase.Instance.NameOf(59438930) +
+                          "  groups=" + CardDatabase.Instance.AliasGroupCount);
         CardDatabase.Instance.Close();
         return 0;
     }
@@ -401,7 +438,11 @@ public partial class App : Application
             var profile = JsonSerializer.Deserialize<AiProfile>(File.ReadAllText(profilePath), WindBotProject.JsonOpts);
             if (profile == null) { Console.Error.WriteLine("profile json 파싱 실패"); return 2; }
             RuleMigration.Normalize(profile);
+            // B-12: --gen 도 별칭을 해석한다 (EDOPro 경로는 3번째 인자 → 없으면 저장된 설정)
+            var cdb = EnsureCardDatabase(args.Length >= 4 ? Path.GetFullPath(args[3]) : null);
             var src = RuleCodeGen.Generate(profile);
+            foreach (var w in RuleCodeGen.Warnings) Console.WriteLine("WARN " + w);
+            Console.WriteLine("CDB " + cdb + " aliases=" + CardDatabase.Instance.AliasGroupCount);
             var dir = Path.GetDirectoryName(outPath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(outPath, src, new System.Text.UTF8Encoding(false));
@@ -413,6 +454,30 @@ public partial class App : Application
             Console.Error.WriteLine("ERROR " + ex.Message);
             return 3;
         }
+    }
+
+    /// <summary>
+    /// 헤드리스 코드젠이 같은 이름 카드 별칭(B-12)을 해석할 수 있도록 카드 DB 를 연다 (읽기 전용).
+    /// 이미 열려 있으면 그대로 쓴다. 반환값 = 열린 cdb 수 (0 = 못 열었음 → 별칭은 자기 자신만).
+    /// </summary>
+    private static int EnsureCardDatabase(string? windBotRoot)
+    {
+        if (CardDatabase.Instance.IsOpen) return CardDatabase.Instance.Paths.Count;
+        try
+        {
+            var root = windBotRoot;
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                var edopro = AppSettings.Load().EdoproPath;
+                if (string.IsNullOrWhiteSpace(edopro) || !Directory.Exists(edopro)) return 0;
+                root = Directory.Exists(Path.Combine(edopro, "WindBot")) ? Path.Combine(edopro, "WindBot") : edopro;
+            }
+            var candidates = CardDatabase.FindCandidates(root!);
+            if (candidates.Count == 0) return 0;
+            CardDatabase.Instance.OpenMany(candidates);
+            return CardDatabase.Instance.Paths.Count;
+        }
+        catch { return 0; }
     }
 
     private static int RunExport(string[] args)
@@ -459,7 +524,11 @@ public partial class App : Application
                 : Path.GetDirectoryName(profilePath) ?? ".";
             var project = new WindBotProject(root);
 
+            // B-12: 같은 이름 카드 별칭을 해석하려면 cdb 가 필요하다 (읽기 전용)
+            var cdb = EnsureCardDatabase(project.Root);
             var source = RuleCodeGen.Generate(profile);
+            foreach (var w in RuleCodeGen.Warnings) Console.WriteLine("WARN " + w);
+            Console.WriteLine("CDB " + cdb + " aliases=" + CardDatabase.Instance.AliasGroupCount);
             var cls = RuleCodeGen.ClassName(profile.Engine);
             var res = PluginBuilder.BuildFromSource(project, cls, source);
 

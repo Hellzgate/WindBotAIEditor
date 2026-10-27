@@ -133,6 +133,12 @@ namespace WindBotAIEditor.Models
         /// <summary>앞 조건과의 연결: "and" | "or" (첫 조건은 무시)</summary>
         public string Join { get; set; } = "and";
 
+        /// <summary>B-14: 조건 부정 — 식 전체를 !(...) 로 감싼다</summary>
+        public bool Not { get; set; }
+
+        /// <summary>B-14: 테마 조건에서 몬스터만 (Data.Type &amp; 0x1)</summary>
+        public bool MonsterOnly { get; set; }
+
         /// <summary>종족 조건(fieldHasRace)에서 사용할 종족 비트값 (0 = 전체/종족 무관)</summary>
         public int RaceId { get; set; } = 0;
 
@@ -176,15 +182,104 @@ namespace WindBotAIEditor.Models
     public class ChoiceRule : ObservableModel
     {
         private int _whenCard;
+        private string _pick = "enemyHighestAttack";
+        private string _on = "SelectCard";
 
         /// <summary>우선순위 (낮을수록 먼저 매칭)</summary>
         public int Priority { get; set; } = 100;
 
         /// <summary>콜백 이름 (SelectCard, SelectSum, RitualTribute, FusionMaterial ...)</summary>
-        public string On { get; set; } = "SelectCard";
+        public string On
+        {
+            get => _on;
+            set
+            {
+                if (Set(ref _on, value)) Raise(nameof(IsSelectOption));
+            }
+        }
 
         /// <summary>PickPolicy Id</summary>
-        public string Pick { get; set; } = "enemyHighestAttack";
+        public string Pick
+        {
+            get => _pick;
+            set
+            {
+                if (Set(ref _pick, value))
+                {
+                    Raise(nameof(IsThemeMatch));
+                    Raise(nameof(ThemePickText));
+                }
+            }
+        }
+
+        /// <summary>B-14: 정책이 "테마 카드 우선" 인지 (테마 칸 표시 여부)</summary>
+        [JsonIgnore]
+        public bool IsThemeMatch => _pick == "themeMatch";
+
+        /// <summary>B-14: 선택 콜백이 SelectOption 인지 (옵션 desc 칸 표시 여부)</summary>
+        [JsonIgnore]
+        public bool IsSelectOption => On == "SelectOption";
+
+        /// <summary>B-14: 테마 카드 우선 정책의 테마 setcode (0 = 전체)</summary>
+        public int ThemeCode { get; set; }
+
+        /// <summary>B-14: 테마 카드 우선 정책에서 몬스터만 고르기</summary>
+        public bool ThemeMonsterOnly { get; set; }
+
+        /// <summary>B-14: 테마 카드 우선 정책에서 제외할 카드 ID 목록</summary>
+        public List<int> ExcludeCards { get; set; } = new List<int>();
+
+        private int _excludeAdd;
+
+        /// <summary>B-14: 제외 카드 입력 상자 (카드를 고르면 ExcludeCards 에 추가)</summary>
+        [JsonIgnore]
+        public int ExcludeCardAdd
+        {
+            get => _excludeAdd;
+            set
+            {
+                if (!Set(ref _excludeAdd, value)) return;
+                if (value <= 0) return;
+                ExcludeCards ??= new List<int>();
+                if (!ExcludeCards.Contains(value)) ExcludeCards.Add(value);
+                Raise(nameof(ExcludeCardText));
+            }
+        }
+
+        /// <summary>B-14: 제외 카드 목록 표시</summary>
+        [JsonIgnore]
+        public string ExcludeCardText
+        {
+            get
+            {
+                if (ExcludeCards == null || ExcludeCards.Count == 0) return "(없음)";
+                var sb = new System.Text.StringBuilder();
+                foreach (var id in ExcludeCards)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    var name = Services.CardDatabase.Instance.NameOf(id);
+                    sb.Append(name.Length > 0 ? name : id.ToString());
+                }
+                return sb.ToString();
+            }
+        }
+
+        /// <summary>B-14: 제외 카드 목록 비우기 (UI 버튼)</summary>
+        public void ClearExcludeCards()
+        {
+            ExcludeCards?.Clear();
+            _excludeAdd = 0;
+            Raise(nameof(ExcludeCardAdd));
+            Raise(nameof(ExcludeCardText));
+        }
+
+        /// <summary>B-14: SelectOption 옵션 desc(문자열 ID). 0 = 무관</summary>
+        public long OptionDesc { get; set; }
+
+        [JsonIgnore]
+        public string ThemePickText => IsThemeMatch
+            ? "테마 " + ThemeCode + (ThemeMonsterOnly ? " · 몬스터만" : "") + " · 제외 " + (ExcludeCards?.Count ?? 0)
+            : "테마 무관";
 
         /// <summary>codeMatch 정책에서 사용</summary>
         public int Card { get; set; }
@@ -513,7 +608,7 @@ namespace WindBotAIEditor.Models
     {
         public string Engine { get; set; } = "MyDeck";
         public string Description { get; set; } = "";
-        public int SchemaVersion { get; set; } = 8;
+        public int SchemaVersion { get; set; } = 11;
         public List<ActionRule> Actions { get; set; } = new List<ActionRule>();
         public List<ChoiceRule> Choices { get; set; } = new List<ChoiceRule>();
         public List<ForbidRule> Forbids { get; set; } = new List<ForbidRule>();
@@ -557,6 +652,31 @@ namespace WindBotAIEditor.Models
 
         /// <summary>이 카드가 놓인 세로열을 피해 마법/함정을 배치한다 (0 = 사용 안 함)</summary>
         public int AvoidColumnCard { get; set; }
+
+        /// <summary>
+        /// B-12: cdb 카드 이름이 같으면 같은 카드로 취급한다 (대체 일러 / 재록 = 다른 ID).
+        /// 예) 금지 59438930 → 생성 코드가 59438931 도 함께 판정. 구형 JSON 에 없으면 true 로 읽힌다.
+        /// </summary>
+        public bool SameNameAliases { get; set; } = true;
+
+        /// <summary>
+        /// B-15: 자유 플레이에 마법/함정 세트(<c>ExecutorType.SpellSet</c>)도 추가한다. 기본 OFF.
+        /// 함정·속공은 패에서 발동할 수 없어 세트만 가능하므로, 이 옵션이 없으면 패에서 썩는다.
+        /// </summary>
+        public bool FreePlaySetSpell { get; set; } = false;
+
+        /// <summary>B-15: 세트할 카드 종류 — all(마법+함정) | trap(함정만) | quick(속공 마법만)</summary>
+        public string FreePlaySetSpellKind { get; set; } = "all";
+
+        /// <summary>B-15: 세트하지 않을 카드 ID 목록 (패트랩 등). sameNameAliases 규칙으로 OR 확장된다.</summary>
+        public List<int> FreePlaySetSpellExclude { get; set; } = new List<int>();
+
+        /// <summary>
+        /// B-16: 릴리스/제물 후보에서 엑스트라 덱 몬스터(융합·싱크로·엑시즈·링크)를 뺀다. 기본 <b>ON</b>.
+        /// 키가 없는 구형 JSON 은 이니셜라이저 기본값(ON)으로 읽히고, <see cref="RuleMigration.NormalizeFreePlayProtectExtra"/>
+        /// 가 스키마 버전을 11 로 올려 한 번만 보정한다. (소재 사용은 그대로 허용 — 릴리스만 막는다)
+        /// </summary>
+        public bool FreePlayProtectExtra { get; set; } = true;
     }
 
     /// <summary>특정 카드의 특정 행동을 금지하는 규칙.</summary>
@@ -667,6 +787,23 @@ namespace WindBotAIEditor.Models
         public override string ToString() => Label;
     }
 
+    /// <summary>B-15: 자유 플레이에서 세트(SpellSet)할 마법/함정 종류</summary>
+    public class FreePlaySetKindOption
+    {
+        public string Id { get; set; } = "";
+        public string Label { get; set; } = "";
+
+        public static readonly List<FreePlaySetKindOption> All = new List<FreePlaySetKindOption>
+        {
+            new FreePlaySetKindOption { Id = "all",   Label = "전체 (마법 + 함정)" },
+            new FreePlaySetKindOption { Id = "trap",  Label = "함정만" },
+            new FreePlaySetKindOption { Id = "quick", Label = "속공 마법만" },
+        };
+
+        public static FreePlaySetKindOption Find(string id) => All.Find(t => t.Id == id) ?? All[0];
+        public override string ToString() => Label;
+    }
+
     /// <summary>소환 시 표시형식</summary>
     public class PositionOption
     {
@@ -751,22 +888,28 @@ namespace WindBotAIEditor.Models
     {
         public string Id { get; set; } = "";
         public string Label { get; set; } = "";
+
+        /// <summary>③ 탭 콤보 툴팁 (항목 설명)</summary>
+        public string Hint { get; set; } = "";
+
         public static readonly List<ForbidAction> All = new List<ForbidAction>
         {
-            new ForbidAction { Id = "Activate",       Label = "발동 금지" },
-            new ForbidAction { Id = "ActivateOnField",Label = "내 필드에서 발동 금지" },
-            new ForbidAction { Id = "ActivateHand",  Label = "내 패에서 발동 금지" },
-            new ForbidAction { Id = "ActivateGrave", Label = "내 묘지에서 발동 금지" },
-            new ForbidAction { Id = "NoTargetMyField",   Label = "내(AI) 필드 카드에 대하여 발동 불가" },
-            new ForbidAction { Id = "NoTargetMyCard",    Label = "내(AI) 카드에 대하여 발동 금지" },
-            new ForbidAction { Id = "NoTargetEnemyCard", Label = "상대(플레이어) 카드에 대하여 발동 금지" },
-            new ForbidAction { Id = "BlockEffect",     Label = "특정 효과 발동 금지 (효과번호/턴)" },
-            new ForbidAction { Id = "Summon",         Label = "일반 소환 금지 (세트 유도)" },
-            new ForbidAction { Id = "SummonSet",      Label = "일반 소환 금지 (세트도 금지)" },
-            new ForbidAction { Id = "Attack",         Label = "공격 금지" },
-            new ForbidAction { Id = "Target",         Label = "효과 대상 선택 금지" },
-            new ForbidAction { Id = "Release",        Label = "릴리스/소재 사용 금지" },
-            new ForbidAction { Id = "ChainLimit",     Label = "체인당 N회 제한" },
+            new ForbidAction { Id = "Activate",       Label = "발동 금지",                 Hint = "그 카드를 발동하지 않는다" },
+            new ForbidAction { Id = "ActivateOnField",Label = "내 필드에서 발동 금지",      Hint = "필드에 있는 그 카드를 발동하지 않는다" },
+            new ForbidAction { Id = "ActivateHand",  Label = "내 패에서 발동 금지",         Hint = "패에 있는 그 카드를 발동하지 않는다" },
+            new ForbidAction { Id = "ActivateGrave", Label = "내 묘지에서 발동 금지",       Hint = "묘지에 있는 그 카드를 발동하지 않는다" },
+            // B-13: 체인 방향 제한 — 상대 카드에 체인하는 것은 허용
+            new ForbidAction { Id = "ActivateChainToMine", Label = "내 카드에 체인하여 발동 금지", Hint = "내 카드에 체인해서 발동하지 않는다 (상대 카드에는 허용)" },
+            new ForbidAction { Id = "NoTargetMyField",   Label = "내(AI) 필드 카드에 대하여 발동 불가", Hint = "내 필드 카드를 대상으로 하는 발동을 하지 않는다" },
+            new ForbidAction { Id = "NoTargetMyCard",    Label = "내(AI) 카드에 대하여 발동 금지",      Hint = "내 카드를 대상으로 하는 발동을 하지 않는다" },
+            new ForbidAction { Id = "NoTargetEnemyCard", Label = "상대(플레이어) 카드에 대하여 발동 금지", Hint = "상대 카드를 대상으로 하는 발동을 하지 않는다" },
+            new ForbidAction { Id = "BlockEffect",     Label = "특정 효과 발동 금지 (효과번호/턴)", Hint = "지정 효과번호의 발동을 막는다 (-1 = 모든 효과)" },
+            new ForbidAction { Id = "Summon",         Label = "일반 소환 금지 (세트 유도)",   Hint = "일반 소환 대신 세트한다" },
+            new ForbidAction { Id = "SummonSet",      Label = "일반 소환 금지 (세트도 금지)", Hint = "일반 소환과 세트를 모두 하지 않는다" },
+            new ForbidAction { Id = "Attack",         Label = "공격 금지",                 Hint = "공격 선언을 하지 않는다" },
+            new ForbidAction { Id = "Target",         Label = "효과 대상 선택 금지",         Hint = "그 카드의 효과 대상을 선택하지 않는다" },
+            new ForbidAction { Id = "Release",        Label = "릴리스/소재 사용 금지",       Hint = "그 카드를 릴리스/소재로 쓰지 않는다" },
+            new ForbidAction { Id = "ChainLimit",     Label = "체인당 N회 제한",            Hint = "한 체인에 N회까지만 발동한다" },
         };
         public static ForbidAction Find(string id) => All.Find(a => a.Id == id) ?? All[0];
         public override string ToString() => Label;
@@ -865,6 +1008,8 @@ namespace WindBotAIEditor.Models
             new PickPolicy { Id = "enemyHighestDefense",Label = "수비력 높은 순" },
             new PickPolicy { Id = "lowestLevel",        Label = "레벨 낮은 순" },
             new PickPolicy { Id = "codeMatch",          Label = "특정 카드 우선" },
+            new PickPolicy { Id = "themeMatch",         Label = "테마 카드 우선" },
+            new PickPolicy { Id = "chainCard",          Label = "발동 중인 카드" },
             new PickPolicy { Id = "firstAvailable",     Label = "목록 순서대로" },
         };
         public override string ToString() => Label;
@@ -909,8 +1054,40 @@ namespace WindBotAIEditor.Models
             if (p == null) return;
             foreach (var a in p.Actions ?? new List<ActionRule>()) Fix(a.Conditions);
             foreach (var f in p.Forbids ?? new List<ForbidRule>()) Fix(f.Conditions);
-            foreach (var c in p.Choices ?? new List<ChoiceRule>()) { if (c == null) continue; c.Conditions ??= new List<Condition>(); Fix(c.Conditions); }
+            foreach (var c in p.Choices ?? new List<ChoiceRule>()) { if (c == null) continue; c.Conditions ??= new List<Condition>(); c.ExcludeCards ??= new List<int>(); Fix(c.Conditions); }
+            NormalizeFreePlaySetSpell(p);
+            NormalizeFreePlayProtectExtra(p);
             NormalizeRoutes(p);
+        }
+
+        /// <summary>
+        /// B-15: 자유 플레이 마함 세트 옵션 정규화.
+        /// 구형 JSON 은 키가 없으므로 <c>false / "all" / 빈 목록</c> 으로 읽히고, 여기서 null·미지원 값만 바로잡는다.
+        /// </summary>
+        public static void NormalizeFreePlaySetSpell(AiProfile? p)
+        {
+            if (p == null) return;
+            p.FreePlaySetSpellExclude ??= new List<int>();
+            var cleaned = new List<int>();
+            foreach (var id in p.FreePlaySetSpellExclude)
+                if (id > 0 && !cleaned.Contains(id)) cleaned.Add(id);
+            p.FreePlaySetSpellExclude = cleaned;
+            p.FreePlaySetSpellKind = FreePlaySetKindOption.Find(p.FreePlaySetSpellKind).Id;   // null/미지원 → all
+        }
+
+        /// <summary>
+        /// B-16: 자유 플레이 엑스트라 덱 릴리스 보호 옵션 마이그레이션.
+        /// 스키마 10 이하(키가 없던 파일)는 기본값 <b>ON</b> 으로 맞추고 버전을 올린다.
+        /// 한 번 올라간 뒤에는 사용자가 끈 값을 그대로 존중한다(스키마 11 파일은 손대지 않는다).
+        /// </summary>
+        public static void NormalizeFreePlayProtectExtra(AiProfile? p)
+        {
+            if (p == null) return;
+            if (p.SchemaVersion < 11)
+            {
+                p.FreePlayProtectExtra = true;
+                p.SchemaVersion = 11;
+            }
         }
 
         /// <summary>

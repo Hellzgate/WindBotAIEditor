@@ -102,6 +102,9 @@ namespace WindBotAIEditor
             CmbTurnChoice.SelectedValue = "random";
             CmbChainBasis.ItemsSource = ChainBases;
             CmbChainBasis.SelectedValue = "code";
+            CmbFreePlaySetKind.ItemsSource = FreePlaySetKindOption.All;   // B-15
+            CmbFreePlaySetKind.SelectedValue = "all";
+            UpdateFreePlaySetSpellUi();
 
             ChkDarkMode.IsChecked = AppSettings.Load().DarkMode;
             Loaded += (_, __) =>
@@ -278,6 +281,11 @@ namespace WindBotAIEditor
             _profile.DialogFile = (CmbDialog.SelectedValue as string) ?? "";
             _profile.ChainBasis = (CmbChainBasis.SelectedValue as string) ?? "code";
             _profile.AvoidColumnCard = CardAvoidColumn?.CardId ?? 0;
+            _profile.SameNameAliases = ChkSameNameAliases.IsChecked == true;   // B-12
+            _profile.FreePlaySetSpell = ChkFreePlaySetSpell.IsChecked == true;                     // B-15
+            _profile.FreePlaySetSpellKind = (CmbFreePlaySetKind.SelectedValue as string) ?? "all";
+            _profile.FreePlaySetSpellExclude ??= new List<int>();
+            _profile.FreePlayProtectExtra = ChkFreePlayProtectExtra.IsChecked == true;              // B-16
             _profile.Actions = _actions.ToList();
             _profile.Choices = _choices.ToList();
             _profile.Forbids = _forbids.ToList();
@@ -302,6 +310,18 @@ namespace WindBotAIEditor
             CmbDialog.SelectedValue = string.IsNullOrWhiteSpace(p.DialogFile) ? "" : p.DialogFile;
             CmbChainBasis.SelectedValue = string.IsNullOrWhiteSpace(p.ChainBasis) ? "code" : p.ChainBasis;
             if (CardAvoidColumn != null) CardAvoidColumn.CardId = p.AvoidColumnCard;
+            if (ChkSameNameAliases != null) ChkSameNameAliases.IsChecked = p.SameNameAliases;   // B-12
+
+            // B-15: 자유 플레이 마함 세트
+            p.FreePlaySetSpellExclude ??= new List<int>();
+            if (ChkFreePlaySetSpell != null) ChkFreePlaySetSpell.IsChecked = p.FreePlaySetSpell;
+            if (CmbFreePlaySetKind != null)
+                CmbFreePlaySetKind.SelectedValue = FreePlaySetKindOption.Find(p.FreePlaySetSpellKind).Id;
+            if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.CardId = 0;
+            UpdateFreePlaySetSpellUi();
+
+            // B-16: 자유 플레이 엑스트라 덱 릴리스 보호 (키가 없던 구형 파일은 기본 ON)
+            if (ChkFreePlayProtectExtra != null) ChkFreePlayProtectExtra.IsChecked = p.FreePlayProtectExtra;
 
             _actions.Clear(); foreach (var x in p.Actions) _actions.Add(x);
             _choices.Clear(); foreach (var x in p.Choices) _choices.Add(x);
@@ -413,6 +433,8 @@ namespace WindBotAIEditor
             var note = "";
             if (p.FreePlay && p.Actions.Count == 0 && p.Triggers.Count == 0)
                 note = "[자유 플레이] 행동 규칙이 없어 기본 AI 동작을 자동 추가했습니다. 금지 규칙만 제약으로 적용됩니다." + Environment.NewLine + Environment.NewLine;
+            if (RuleCodeGen.Warnings.Count > 0)   // B-12: 별칭 8개 초과 / cdb 미로드
+                note += string.Join(Environment.NewLine, RuleCodeGen.Warnings.Select(w => "[별칭] " + w)) + Environment.NewLine + Environment.NewLine;
 
             TxtBuildLog.Text = note + res.Log + Environment.NewLine + Environment.NewLine +
                                (res.Ok ? "OK  → " + res.OutputPath : "FAILED");
@@ -554,6 +576,85 @@ namespace WindBotAIEditor
                 return;
             }
             if (PickCard(cond.Card) is int v) { cond.Card = v; GridChoiceConds.Items.Refresh(); }
+        }
+
+        /// <summary>B-14: 선택 규칙의 제외 카드 목록을 비운다 (셀 안의 × 버튼)</summary>
+        private void OnClearChoiceExclude(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.DataContext is ChoiceRule c)
+            {
+                c.ClearExcludeCards();
+                GridChoices.Items.Refresh();
+                Status("제외 카드 목록을 비웠습니다 (규칙 우선 " + c.Priority + ")");
+            }
+        }
+
+        // ================= B-15: 자유 플레이 마법/함정 세트 =================
+
+        /// <summary>B-15: 체크박스 상태에 따라 종류/제외 카드 줄을 보이거나 숨긴다.</summary>
+        private void UpdateFreePlaySetSpellUi()
+        {
+            if (PnlFreePlaySetSpell == null || ChkFreePlaySetSpell == null) return;
+            var on = ChkFreePlaySetSpell.IsChecked == true;
+            PnlFreePlaySetSpell.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            if (CmbFreePlaySetKind != null) CmbFreePlaySetKind.IsEnabled = on;
+            if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.IsEnabled = on;
+            UpdateFreePlaySetExcludeText();
+        }
+
+        /// <summary>B-15: 세트 제외 카드 목록 표시 (카드명 → 없으면 ID)</summary>
+        private void UpdateFreePlaySetExcludeText()
+        {
+            if (TxtFreePlaySetExclude == null) return;
+            var ids = _profile?.FreePlaySetSpellExclude;
+            if (ids == null || ids.Count == 0)
+            {
+                TxtFreePlaySetExclude.Text = "(없음)";
+                return;
+            }
+            var sb = new System.Text.StringBuilder();
+            foreach (var id in ids)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                var name = CardDatabase.Instance.NameOf(id);
+                sb.Append(name.Length > 0 ? name : id.ToString());
+            }
+            TxtFreePlaySetExclude.Text = sb.ToString();
+        }
+
+        private void OnFreePlaySetSpellChanged(object sender, RoutedEventArgs e) => UpdateFreePlaySetSpellUi();
+
+        /// <summary>B-15: 제외 카드 입력 상자의 카드를 목록에 추가</summary>
+        private void OnAddFreePlaySetExclude(object sender, RoutedEventArgs e)
+            => AddFreePlaySetExclude(CardFreePlaySetExclude?.CardId ?? 0);
+
+        /// <summary>B-15: 제외 카드 목록 비우기</summary>
+        private void OnClearFreePlaySetExclude(object sender, RoutedEventArgs e) => ClearFreePlaySetExclude();
+
+        /// <summary>B-15: 제외 카드 추가 본체 (UI/uicheck 공용)</summary>
+        private bool AddFreePlaySetExclude(int id)
+        {
+            if (id <= 0)
+            {
+                Status("제외 카드: 카드명을 검색해 고른 뒤 [추가] 를 누르세요");
+                return false;
+            }
+            _profile.FreePlaySetSpellExclude ??= new List<int>();
+            if (!_profile.FreePlaySetSpellExclude.Contains(id))
+                _profile.FreePlaySetSpellExclude.Add(id);
+            if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.CardId = 0;
+            UpdateFreePlaySetExcludeText();
+            Status("세트 제외 카드 추가: " + id + " (총 " + _profile.FreePlaySetSpellExclude.Count + "개)");
+            return true;
+        }
+
+        /// <summary>B-15: 제외 카드 목록 비우기 본체 (UI/uicheck 공용)</summary>
+        private void ClearFreePlaySetExclude()
+        {
+            _profile.FreePlaySetSpellExclude?.Clear();
+            if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.CardId = 0;
+            UpdateFreePlaySetExcludeText();
+            Status("세트 제외 카드 목록을 비웠습니다");
         }
 
         private void OnAddForbid(object sender, RoutedEventArgs e)
@@ -1405,7 +1506,9 @@ namespace WindBotAIEditor
             string[] names =
             {
                 "TxtEngineName", "TxtEngineDesc", "ChkFreePlay", "ChkDebugEffect", "CmbRps", "CmbTurnChoice",
-                "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
+                "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
+                "ChkFreePlaySetSpell", "CmbFreePlaySetKind", "CardFreePlaySetExclude", "TxtFreePlaySetExclude", "PnlFreePlaySetSpell",
+                "ChkFreePlayProtectExtra",
                 "TxtRuleSummary", "TxtProfilePath", "TxtBuildLog",
                 "ListDecks", "TxtDeck", "TxtDeckCardFilter", "ListDeckCards", "TxtDeckInfo",
                 "GridActions", "GridConds", "GridChoices", "GridChoiceConds", "GridForbids", "GridForbidConds",
@@ -1491,6 +1594,21 @@ namespace WindBotAIEditor
                 if (SettingsExpandedHeight <= SettingsCollapsedHeight)
                     problems.Add("설정 펼치기가 동작하지 않음 (" + Math.Round(SettingsCollapsedHeight) +
                                  " → " + Math.Round(SettingsExpandedHeight) + ")");
+
+                // B-12: 같은 이름 카드 체크박스가 설정 카드(스크롤 영역) 안에서 실제로 보이는지
+                double aliasBottom = -1;
+                try
+                {
+                    var pt = ChkSameNameAliases.TransformToAncestor(PnlSettings)
+                        .Transform(new Point(0, ChkSameNameAliases.ActualHeight + ChkSameNameAliases.Margin.Bottom));
+                    aliasBottom = pt.Y;
+                }
+                catch { }
+                LayoutMetrics += " aliasChkBottom=" + Math.Round(aliasBottom) + "/viewport=" + Math.Round(PnlSettings.ActualHeight);
+                if (aliasBottom < 0) problems.Add("같은 이름 카드 체크박스를 찾을 수 없음");
+                else if (aliasBottom > PnlSettings.ActualHeight)
+                    problems.Add("같은 이름 카드 체크박스가 설정 카드 스크롤 아래로 밀려 안 보임 (" +
+                                 Math.Round(aliasBottom) + " > " + Math.Round(PnlSettings.ActualHeight) + ")");
                 SetSettingsCollapsed(true);
                 MeasureAt(minW, minH);
                 if (PnlSettings.Visibility != Visibility.Collapsed) problems.Add("설정 카드 복원(접힘) 실패");
@@ -1603,6 +1721,21 @@ namespace WindBotAIEditor
 
         public int RouteStepCount(bool second) =>
             (second ? _routesSecond : _routes).Sum(s => s.Steps == null ? 0 : s.Steps.Count);
+
+        /// <summary>B-14 검증 요약 (--uicheck 출력용)</summary>
+        public string B14Metrics { get; private set; } = "(없음)";
+
+        /// <summary>B-15 검증 요약 (--uicheck 출력용)</summary>
+        public string B15Metrics { get; private set; } = "(없음)";
+
+        /// <summary>B-16 검증 요약 (--uicheck 출력용)</summary>
+        public string B16Metrics { get; private set; } = "(없음)";
+
+        /// <summary>B-17 검증 요약 (--uicheck 출력용)</summary>
+        public string B17Metrics { get; private set; } = "(없음)";
+
+        /// <summary>B-18 검증 요약 (--uicheck 출력용)</summary>
+        public string B18Metrics { get; private set; } = "(없음)";
 
         /// <summary>창을 표시하지 않고 레이아웃만 갱신 (템플릿/바인딩 생성)</summary>
         private void Relayout()
@@ -1795,11 +1928,497 @@ namespace WindBotAIEditor
                 OnRemoveChoice(null, null);
             }
             if (_choices.Count != beforeChoices) problems.Add("② 원상 복구 실패(선택 규칙 수)");
+
+            // 9) ② 선택 규칙 확장(B-14): 테마 카드 우선 / 옵션 desc / 조건 부정·몬스터만
+            int beforeB14 = _choices.Count;
+            SelectRuleTab(1);
+            Relayout();
+            foreach (var need in new[] { "옵션desc", "테마 (우선)", "몬스터만", "제외 카드 추가", "제외 목록" })
+                if (!GridChoices.Columns.Any(col => Convert.ToString(col.Header) == need))
+                    problems.Add("B-14 ② 컬럼 없음: " + need);
+            foreach (var need in new[] { "몬스터만", "부정(!)" })
+                if (!GridChoiceConds.Columns.Any(col => Convert.ToString(col.Header) == need))
+                    problems.Add("B-14 ② 조건 컬럼 없음: " + need);
+
+            OnAddChoice(null, null);
+            var b14 = SelectedChoice;
+            if (b14 == null) problems.Add("B-14 선택 규칙 추가 후 행이 선택되지 않음");
+            else
+            {
+                b14.On = "SelectCard";
+                b14.Pick = "themeMatch";
+                b14.ThemeCode = 484;                 // SET_RAISE_MOON
+                b14.ThemeMonsterOnly = true;
+                b14.ExcludeCardAdd = 100458021;      // 스퀴즈
+                GridChoices.Items.Refresh();
+                Relayout();
+
+                if (!b14.IsThemeMatch) problems.Add("B-14 테마 정책 플래그 실패");
+                if (b14.ExcludeCards == null || b14.ExcludeCards.Count != 1 || b14.ExcludeCards[0] != 100458021)
+                    problems.Add("B-14 제외 카드 추가 실패");
+                if (b14.ExcludeCardText == "(없음)") problems.Add("B-14 제외 카드 표시 실패: " + b14.ExcludeCardText);
+
+                // 테마 칸은 정책=테마 카드 우선 일 때만 보인다 (DataTrigger 확인)
+                string rowState = "row=null", themeState = "-", hideState = "-";
+                var b14Row = GridChoices.ItemContainerGenerator
+                    .ContainerFromIndex(GridChoices.Items.Count - 1) as DependencyObject;
+                if (b14Row != null)
+                {
+                    rowState = "row=OK";
+                    var themeBox = FindChild<Controls.OptionSearchBox>(b14Row);
+                    if (themeBox == null) problems.Add("B-14 테마 검색 상자 미생성 (선택 규칙 행)");
+                    else
+                    {
+                        themeState = "visible=" + themeBox.Visibility;
+                        if (themeBox.Visibility != Visibility.Visible) problems.Add("B-14 테마 정책인데 테마 상자가 숨겨짐");
+                    }
+                    b14.Pick = "lowestLevel";
+                    GridChoices.Items.Refresh();
+                    Relayout();
+                    themeBox = FindChild<Controls.OptionSearchBox>(b14Row);
+                    if (themeBox != null)
+                    {
+                        hideState = "hidden=" + themeBox.Visibility;
+                        if (themeBox.Visibility != Visibility.Collapsed)
+                            problems.Add("B-14 테마 정책이 아닌데 테마 상자가 보임");
+                    }
+                    b14.Pick = "themeMatch";
+                    GridChoices.Items.Refresh();
+                    Relayout();
+                }
+
+                var srcPick = RuleCodeGen.Generate(CurrentProfile());
+                if (srcPick.IndexOf("PickByTheme_", StringComparison.Ordinal) < 0) problems.Add("B-14 PickByTheme 헬퍼 미생성");
+                if (srcPick.IndexOf("(c.Data.Type & 0x1) == 0", StringComparison.Ordinal) < 0) problems.Add("B-14 몬스터만 판정 미생성");
+                if (srcPick.IndexOf(".IsCode(100458021)", StringComparison.Ordinal) < 0) problems.Add("B-14 제외 카드 판정 미생성");
+
+                b14.On = "SelectOption";
+                b14.OptionIndex = 1;
+                b14.OptionDesc = 1607328404;
+                b14.WhenCard = 990000404;   // uicheck 전용 표식 — 실제 프로필의 같은 desc 규칙과 구분
+                b14.Conditions.Add(new Condition
+                {
+                    Kind = "handHasTheme", ThemeCode = 484, MonsterOnly = true, Not = true, Side = "me", Join = "and"
+                });
+                b14.NotifyConditions();
+                GridChoices.Items.Refresh();
+                Relayout();
+
+                var srcOpt = RuleCodeGen.Generate(CurrentProfile());
+                if (srcOpt.IndexOf("options.Contains(1607328404)", StringComparison.Ordinal) < 0) problems.Add("B-14 옵션 desc 조건 미생성");
+                if (srcOpt.IndexOf("!(HandHasThemeMonster(", StringComparison.Ordinal) < 0) problems.Add("B-14 조건 부정 + 몬스터만 미생성");
+
+                // JSON 왕복: 테마/제외/desc/부정이 저장 → 재읽기에서 유지
+                var jsonB14 = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+                var backB14 = JsonSerializer.Deserialize<AiProfile>(jsonB14, WindBotProject.JsonOpts);
+                var ruleB14 = backB14?.Choices?.FirstOrDefault(x => x != null && x.WhenCard == 990000404);
+                if (ruleB14 == null) problems.Add("B-14 옵션 desc JSON 왕복 실패");
+                else
+                {
+                    if (ruleB14.ExcludeCards == null || ruleB14.ExcludeCards.Count != 1)
+                        problems.Add("B-14 제외 카드 JSON 왕복 실패");
+                    if (!ruleB14.Conditions.Any(x => x.Not && x.MonsterOnly && x.ThemeCode == 484))
+                        problems.Add("B-14 부정/몬스터만 JSON 왕복 실패");
+                }
+
+                OnRemoveChoice(null, null);
+                B14Metrics = "cols=OK condCols=OK exclude=" + (b14.ExcludeCards == null ? 0 : b14.ExcludeCards.Count) +
+                             " " + rowState + " " + themeState + " " + hideState +
+                             " pickHelper=" + (srcPick.IndexOf("PickByTheme_", StringComparison.Ordinal) >= 0 ? "OK" : "NG") +
+                             " optDesc=" + (srcOpt.IndexOf("options.Contains(1607328404)", StringComparison.Ordinal) >= 0 ? "OK" : "NG") +
+                             " negMon=" + (srcOpt.IndexOf("!(HandHasThemeMonster(", StringComparison.Ordinal) >= 0 ? "OK" : "NG") +
+                             " json=" + (ruleB14 != null ? "OK" : "NG");
+            }
+            if (_choices.Count != beforeB14) problems.Add("B-14 원상 복구 실패(선택 규칙 수)");
+
             SelectRuleTab(4);
             Tabs.SelectedIndex = oldTab;      // 호출 전 탭으로 복원
             Relayout();
 
             return problems;
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-15(자유 플레이 마법/함정 세트) UI·코드생성을 검사한다.
+        /// 체크박스/종류/제외 카드를 조작 → 코드 생성 3종 → JSON 왕복 → 원상 복구.
+        /// </summary>
+        public List<string> VerifyFreePlaySetUi()
+        {
+            var problems = new List<string>();
+            var oldTab = Tabs.SelectedIndex;
+            var oldCollapsed = PnlSettings.Visibility != Visibility.Visible;
+            var oldOn = ChkFreePlaySetSpell.IsChecked == true;
+            var oldKind = (CmbFreePlaySetKind.SelectedValue as string) ?? "all";
+            var oldExclude = new List<int>(_profile.FreePlaySetSpellExclude ?? new List<int>());
+            var oldFreePlay = ChkFreePlay.IsChecked == true;
+
+            try
+            {
+                var setIdx = MainTabIndex("⚙ AI 설정");
+                if (setIdx < 0) { problems.Add("B-15: ⚙ AI 설정 탭을 찾을 수 없음"); return problems; }
+                Tabs.SelectedIndex = setIdx;
+                SetSettingsCollapsed(false);
+                MeasureAt(1100, 700);
+
+                // 1) 옵션 OFF → 종류/제외 줄이 숨겨진다
+                ChkFreePlaySetSpell.IsChecked = false;
+                UpdateFreePlaySetSpellUi();
+                MeasureAt(1100, 700);
+                var hidden = PnlFreePlaySetSpell.Visibility;
+                if (hidden != Visibility.Collapsed) problems.Add("B-15: 옵션 OFF 인데 종류/제외 줄이 보임 (" + hidden + ")");
+
+                // 2) 옵션 ON → 보이고 조작 가능
+                ChkFreePlaySetSpell.IsChecked = true;
+                UpdateFreePlaySetSpellUi();
+                MeasureAt(1100, 700);
+                var shown = PnlFreePlaySetSpell.Visibility;
+                var kindEnabled = CmbFreePlaySetKind.IsEnabled;
+                if (shown != Visibility.Visible) problems.Add("B-15: 옵션 ON 인데 종류/제외 줄이 숨겨짐 (" + shown + ")");
+                if (!kindEnabled) problems.Add("B-15: 옵션 ON 인데 종류 콤보가 비활성");
+                if (CmbFreePlaySetKind.Items.Count != 3) problems.Add("B-15: 종류 항목 수 " + CmbFreePlaySetKind.Items.Count + " (3 기대)");
+                if (TxtFreePlaySetExclude.ActualHeight <= 0) problems.Add("B-15: 제외 목록 텍스트 높이 0");
+
+                // 종류/제외 줄이 설정 카드(스크롤 영역) 안에서 실제로 보이는지 (B-12 aliasChkBottom 과 같은 방식)
+                double panelBottom = -1;
+                try
+                {
+                    var pt = PnlFreePlaySetSpell.TransformToAncestor(PnlSettings)
+                        .Transform(new Point(0, PnlFreePlaySetSpell.ActualHeight + PnlFreePlaySetSpell.Margin.Bottom));
+                    panelBottom = pt.Y;
+                }
+                catch { }
+                if (panelBottom < 0) problems.Add("B-15: 종류/제외 줄 위치를 계산할 수 없음");
+                else if (panelBottom > PnlSettings.ActualHeight)
+                    problems.Add("B-15: 종류/제외 줄이 설정 카드 스크롤 아래로 밀려 안 보임 (" +
+                                 Math.Round(panelBottom) + " > " + Math.Round(PnlSettings.ActualHeight) + ")");
+
+                // 3) 제외 카드 추가 / 비우기
+                CardFreePlaySetExclude.CardId = 14558127;
+                AddFreePlaySetExclude(14558127);
+                if (!(_profile.FreePlaySetSpellExclude ?? new List<int>()).Contains(14558127))
+                    problems.Add("B-15: 제외 카드 추가 실패");
+                if (CardFreePlaySetExclude.CardId != 0) problems.Add("B-15: 제외 카드 추가 후 입력 상자가 비워지지 않음");
+                var addedText = TxtFreePlaySetExclude.Text ?? "";
+                if (addedText.IndexOf("(없음)", StringComparison.Ordinal) >= 0) problems.Add("B-15: 제외 목록 텍스트 미갱신");
+                ClearFreePlaySetExclude();
+                if ((_profile.FreePlaySetSpellExclude ?? new List<int>()).Count != 0) problems.Add("B-15: 제외 목록 비우기 실패");
+
+                // 4) 코드 생성: 종류 3가지 + 제외 카드(별칭 확장 포함)
+                ChkFreePlay.IsChecked = true;
+                CardFreePlaySetExclude.CardId = 59438930;
+                AddFreePlaySetExclude(59438930);
+                var kinds = new[] { "all", "trap", "quick" };
+                var expect = new[]
+                {
+                    "(Card.Data.Type & 0x6) != 0",
+                    "(Card.Data.Type & 0x4) != 0",
+                    "(Card.Data.Type & 0x2) != 0 && (Card.Data.Type & 0x10000) != 0"
+                };
+                var seen = new List<string>();
+                for (var i = 0; i < kinds.Length; i++)
+                {
+                    CmbFreePlaySetKind.SelectedValue = kinds[i];
+                    var src = RuleCodeGen.Generate(CurrentProfile());
+                    var ok = src.IndexOf("AddExecutor(ExecutorType.SpellSet", StringComparison.Ordinal) >= 0
+                             && src.IndexOf("Card.Data != null", StringComparison.Ordinal) >= 0
+                             && src.IndexOf(expect[i], StringComparison.Ordinal) >= 0
+                             && src.IndexOf("Card.IsCode(59438930)", StringComparison.Ordinal) >= 0;
+                    seen.Add(kinds[i] + "=" + (ok ? "OK" : "NG"));
+                    if (!ok) problems.Add("B-15: 종류 " + kinds[i] + " 생성 코드 이상");
+                }
+                if (RuleCodeGen.Generate(CurrentProfile()).IndexOf("Card.IsCode(14558127)", StringComparison.Ordinal) >= 0)
+                    problems.Add("B-15: 비운 제외 카드가 생성 코드에 남음");
+
+                // 5) 옵션 OFF → SpellSet 미생성 (회귀)
+                ChkFreePlaySetSpell.IsChecked = false;
+                UpdateFreePlaySetSpellUi();
+                var offOk = RuleCodeGen.Generate(CurrentProfile())
+                    .IndexOf("ExecutorType.SpellSet", StringComparison.Ordinal) < 0;
+                if (!offOk) problems.Add("B-15: 옵션 OFF 인데 SpellSet 이 생성됨");
+
+                // 6) JSON 왕복 (저장 → 재읽기에서 옵션/종류/제외 유지)
+                ChkFreePlaySetSpell.IsChecked = true;
+                CmbFreePlaySetKind.SelectedValue = "trap";
+                var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+                var back = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+                RuleMigration.Normalize(back);
+                var jsonOk = back != null && back.FreePlaySetSpell && back.FreePlaySetSpellKind == "trap"
+                             && back.FreePlaySetSpellExclude != null && back.FreePlaySetSpellExclude.Count == 1
+                             && back.FreePlaySetSpellExclude[0] == 59438930;
+                if (!jsonOk) problems.Add("B-15: JSON 왕복 실패");
+
+                B15Metrics = "shown=" + shown + "/" + hidden +
+                             " kindItems=" + CmbFreePlaySetKind.Items.Count +
+                             " kindEnabled=" + (kindEnabled ? "True" : "False") +
+                             " panelBottom=" + Math.Round(panelBottom) + "/viewport=" + Math.Round(PnlSettings.ActualHeight) +
+                             " excludeAddClear=" + (addedText.Length > 0 ? "OK" : "NG") +
+                             " gen=" + string.Join("/", seen) +
+                             " offNoSpellSet=" + (offOk ? "OK" : "NG") +
+                             " json=" + (jsonOk ? "OK" : "NG");
+            }
+            finally
+            {
+                _profile.FreePlaySetSpellExclude = oldExclude;
+                if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.CardId = 0;
+                ChkFreePlaySetSpell.IsChecked = oldOn;
+                CmbFreePlaySetKind.SelectedValue = oldKind;
+                ChkFreePlay.IsChecked = oldFreePlay;
+                SetSettingsCollapsed(oldCollapsed);
+                UpdateFreePlaySetSpellUi();
+                Tabs.SelectedIndex = oldTab;
+                Relayout();
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-16(자유 플레이 엑스트라 덱 몬스터 릴리스 금지) UI·코드생성을 검사한다.
+        /// 체크박스 가시성 → 코드 생성 ON(3지점 필터) / OFF(0회) → JSON 왕복 → 원상 복구.
+        /// </summary>
+        public List<string> VerifyProtectExtraUi()
+        {
+            var problems = new List<string>();
+            var oldTab = Tabs.SelectedIndex;
+            var oldCollapsed = PnlSettings.Visibility != Visibility.Visible;
+            var oldOn = ChkFreePlayProtectExtra.IsChecked == true;
+
+            try
+            {
+                var setIdx = MainTabIndex("⚙ AI 설정");
+                if (setIdx < 0) { problems.Add("B-16: ⚙ AI 설정 탭을 찾을 수 없음"); return problems; }
+                Tabs.SelectedIndex = setIdx;
+                SetSettingsCollapsed(false);
+                MeasureAt(1100, 700);
+
+                // 1) 체크박스가 설정 카드(스크롤 영역) 안에서 실제로 보이는지
+                if (ChkFreePlayProtectExtra.Visibility != Visibility.Visible)
+                    problems.Add("B-16: 체크박스가 보이지 않음 (" + ChkFreePlayProtectExtra.Visibility + ")");
+                if (ChkFreePlayProtectExtra.ActualHeight <= 0)
+                    problems.Add("B-16: 체크박스 높이 0");
+                if (ChkFreePlayProtectExtra.IsChecked != true)
+                    problems.Add("B-16: 체크박스 기본값이 ON 이 아님");
+                double chkBottom = -1;
+                try
+                {
+                    var pt = ChkFreePlayProtectExtra.TransformToAncestor(PnlSettings)
+                        .Transform(new Point(0, ChkFreePlayProtectExtra.ActualHeight + ChkFreePlayProtectExtra.Margin.Bottom));
+                    chkBottom = pt.Y;
+                }
+                catch { }
+                if (chkBottom < 0) problems.Add("B-16: 체크박스 위치를 계산할 수 없음");
+                else if (chkBottom > PnlSettings.ActualHeight)
+                    problems.Add("B-16: 체크박스가 설정 카드 스크롤 아래로 밀려 안 보임 (" +
+                                 Math.Round(chkBottom) + " > " + Math.Round(PnlSettings.ActualHeight) + ")");
+
+                // 2) 옵션 ON → 3지점 필터 + 판정 헬퍼
+                ChkFreePlayProtectExtra.IsChecked = true;
+                var srcOn = RuleCodeGen.Generate(CurrentProfile());
+                var helperOk = srcOn.IndexOf("private static bool IsExtraDeckMonster(ClientCard c)", StringComparison.Ordinal) >= 0
+                               && srcOn.IndexOf("private IList<ClientCard> FilterExtraRelease(", StringComparison.Ordinal) >= 0;
+                var sumOk = srcOn.IndexOf("if (mode) allowedCards = FilterExtraRelease(allowedCards, min);", StringComparison.Ordinal) >= 0;
+                var cardOk = srcOn.IndexOf("if (hint == HintMsg.Release) allowedCards = FilterExtraRelease(allowedCards, min);", StringComparison.Ordinal) >= 0;
+                var ritualOk = srcOn.IndexOf("// B-16: 의식 릴리스 후보에서 엑스트라 덱 몬스터 제외", StringComparison.Ordinal) >= 0;
+                var bitsOk = srcOn.IndexOf("(t & 0x40) != 0", StringComparison.Ordinal) >= 0
+                             && srcOn.IndexOf("(t & 0x2000) != 0", StringComparison.Ordinal) >= 0
+                             && srcOn.IndexOf("(t & 0x800000) != 0", StringComparison.Ordinal) >= 0
+                             && srcOn.IndexOf("(t & 0x4000000) != 0", StringComparison.Ordinal) >= 0;
+                if (!helperOk) problems.Add("B-16: ON 인데 IsExtraDeckMonster/FilterExtraRelease 헬퍼 없음");
+                if (!sumOk) problems.Add("B-16: ON 인데 OnSelectSum(mode) 필터 없음");
+                if (!cardOk) problems.Add("B-16: ON 인데 OnSelectCard(hint=Release) 필터 없음");
+                if (!ritualOk) problems.Add("B-16: ON 인데 OnSelectRitualTribute 필터 없음");
+                if (!bitsOk) problems.Add("B-16: 엑스트라 덱 비트(0x40/0x2000/0x800000/0x4000000) 식이 다름");
+                // 오버라이드 중복 정의(CS0111) 금지 — 메서드마다 정확히 1개
+                var dupOk = OverrideCount(srcOn, "public override IList<ClientCard> OnSelectSum(") == 1
+                            && OverrideCount(srcOn, "public override IList<ClientCard> OnSelectCard(") == 1
+                            && OverrideCount(srcOn, "public override IList<ClientCard> OnSelectRitualTribute(") == 1;
+                if (!dupOk) problems.Add("B-16: 선택 콜백 오버라이드가 중복 정의됨 (CS0111 위험)");
+
+                // 3) 옵션 OFF → 0회 (회귀)
+                ChkFreePlayProtectExtra.IsChecked = false;
+                var srcOff = RuleCodeGen.Generate(CurrentProfile());
+                var offOk = srcOff.IndexOf("IsExtraDeckMonster", StringComparison.Ordinal) < 0
+                            && srcOff.IndexOf("FilterExtraRelease", StringComparison.Ordinal) < 0;
+                if (!offOk) problems.Add("B-16: 옵션 OFF 인데 보호 코드가 생성됨");
+                var diffLines = srcOn.Split('\n').Length - srcOff.Split('\n').Length;
+
+                // 4) JSON 왕복 + 구형(키 없음) 마이그레이션
+                ChkFreePlayProtectExtra.IsChecked = true;
+                var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+                var back = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+                RuleMigration.Normalize(back);
+                var jsonOk = back != null && back.FreePlayProtectExtra && back.SchemaVersion >= 11;
+                if (!jsonOk) problems.Add("B-16: JSON 왕복 실패");
+
+                // 스키마 10 파일(키 없음) → ON 으로 보정, 스키마 11 에서 명시적 OFF 는 유지
+                var legacy = JsonSerializer.Deserialize<AiProfile>("{\"schemaVersion\":10,\"engine\":\"x\"}", WindBotProject.JsonOpts);
+                RuleMigration.Normalize(legacy);
+                var off11 = JsonSerializer.Deserialize<AiProfile>("{\"schemaVersion\":11,\"engine\":\"x\",\"freePlayProtectExtra\":false}", WindBotProject.JsonOpts);
+                RuleMigration.Normalize(off11);
+                var migOk = legacy != null && legacy.FreePlayProtectExtra && legacy.SchemaVersion == 11
+                            && off11 != null && !off11.FreePlayProtectExtra;
+                if (!migOk) problems.Add("B-16: 마이그레이션(키 없음=ON / 스키마11 OFF 유지) 실패");
+
+                B16Metrics = "chkBottom=" + Math.Round(chkBottom) + "/viewport=" + Math.Round(PnlSettings.ActualHeight) +
+                             " helper=" + (helperOk ? "OK" : "NG") +
+                             " sum=" + (sumOk ? "OK" : "NG") +
+                             " card=" + (cardOk ? "OK" : "NG") +
+                             " ritual=" + (ritualOk ? "OK" : "NG") +
+                             " bits=" + (bitsOk ? "OK" : "NG") +
+                             " noDup=" + (dupOk ? "OK" : "NG") +
+                             " offLines=" + diffLines + "/" + (offOk ? "OK" : "NG") +
+                             " json=" + (jsonOk ? "OK" : "NG") +
+                             " mig=" + (migOk ? "OK" : "NG");
+            }
+            finally
+            {
+                ChkFreePlayProtectExtra.IsChecked = oldOn;
+                SetSettingsCollapsed(oldCollapsed);
+                UpdateFreePlaySetSpellUi();
+                Tabs.SelectedIndex = oldTab;
+                Relayout();
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-17(선택 정책 "발동 중인 카드(체인)") UI·코드생성을 검사한다.
+        /// 정책 목록 노출 → 규칙 1개를 임시 프로필에 넣어 생성(헬퍼/게이트/체인 판정) → 회귀(규칙 없음) → JSON 왕복.
+        /// 프로필 객체를 복제해서 검사하므로 화면 상태는 바뀌지 않는다.
+        /// </summary>
+        public List<string> VerifyChainPickUi()
+        {
+            var problems = new List<string>();
+
+            // 1) 정책 목록(② 탭 콤보가 바인딩하는 정적 목록)에 chainCard 가 있는지
+            var policy = PickPolicies == null ? null : PickPolicies.FirstOrDefault(p => p.Id == "chainCard");
+            var policyOk = policy != null && policy.Label == "발동 중인 카드";
+            if (!policyOk) problems.Add("B-17: 선택 정책 목록에 chainCard(발동 중인 카드)가 없음");
+
+            // 2) 규칙 1개를 넣은 임시 프로필로 생성 → 헬퍼/게이트/판정식 확인
+            var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+            var prof = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            if (prof == null) { problems.Add("B-17: 프로필 복제 실패"); return problems; }
+            RuleMigration.Normalize(prof);
+            prof.Choices.Add(new ChoiceRule { Priority = 1, On = "SelectCard", Pick = "chainCard", WhenCard = 97268402 });
+            var src = RuleCodeGen.Generate(prof);
+
+            var helperOk = src.IndexOf("private IList<ClientCard> PickChainCard_1(IList<ClientCard> cards, int max)", StringComparison.Ordinal) >= 0;
+            var chainOk = src.IndexOf("Duel.CurrentChain", StringComparison.Ordinal) >= 0
+                          && src.IndexOf("if (lc.Controller == 0) continue;", StringComparison.Ordinal) >= 0
+                          && src.IndexOf("if (c.Id != lc.Id || c.Controller != lc.Controller) continue;", StringComparison.Ordinal) >= 0;
+            var gateOk = src.IndexOf("PickChainCard_1(allowedCards, 1).Count > 0", StringComparison.Ordinal) >= 0;
+            var callOk = src.IndexOf("return PickChainCard_1(allowedCards, max);", StringComparison.Ordinal) >= 0;
+            var noStaticOk = src.IndexOf("private static IList<ClientCard> PickChainCard_", StringComparison.Ordinal) < 0;
+            var fallbackOk = src.IndexOf("return Pick(allowedCards, max, 0, 0);", StringComparison.Ordinal) >= 0;
+            var dupOk = OverrideCount(src, "public override IList<ClientCard> OnSelectCard(") == 1;
+            var whenCardOk = src.IndexOf("Card.IsCode(97268402)", StringComparison.Ordinal) >= 0;
+
+            if (!helperOk) problems.Add("B-17: PickChainCard_1 헬퍼가 생성되지 않음");
+            if (!chainOk) problems.Add("B-17: 체인 판정(Duel.CurrentChain / Controller==0 / Id 비교)이 생성되지 않음");
+            if (!gateOk) problems.Add("B-17: 후보 없음 폴백 게이트(.Count > 0)가 없음");
+            if (!callOk) problems.Add("B-17: 규칙이 PickChainCard_1 을 호출하지 않음");
+            if (!noStaticOk) problems.Add("B-17: 헬퍼가 static 으로 생성됨 (Duel 접근 불가)");
+            if (!fallbackOk) problems.Add("B-17: 남은 규칙 폴백(목록 순서)이 없음");
+            if (!dupOk) problems.Add("B-17: OnSelectCard 오버라이드가 중복 정의됨 (CS0111 위험)");
+            if (!whenCardOk) problems.Add("B-17: whenCard(97268402) 게이트가 생성되지 않음");
+
+            // 3) 회귀: chainCard 규칙이 없으면 체인 선택 코드 0회
+            //    (라이브 프로필처럼 이미 chainCard 규칙이 있으면 이 검사는 해당 없음 = OK)
+            var baseSrc = RuleCodeGen.Generate(CurrentProfile());
+            var baseHasChainRule = CurrentProfile().Choices != null
+                                   && CurrentProfile().Choices.Any(c => c != null && c.Pick == "chainCard");
+            var offOk = baseHasChainRule || baseSrc.IndexOf("PickChainCard_", StringComparison.Ordinal) < 0;
+            if (!offOk) problems.Add("B-17: 규칙이 없는데 PickChainCard 코드가 생성됨");
+
+            // 4) JSON 왕복: pick 문자열이 그대로 유지되는지
+            var rt = JsonSerializer.Deserialize<AiProfile>(JsonSerializer.Serialize(prof, WindBotProject.JsonOpts), WindBotProject.JsonOpts);
+            var jsonOk = rt != null && rt.Choices.Any(c => c != null && c.Pick == "chainCard" && c.WhenCard == 97268402);
+            if (!jsonOk) problems.Add("B-17: JSON 왕복에서 pick=chainCard 가 유지되지 않음");
+
+            B17Metrics = "policy=" + (policyOk ? "OK" : "NG") +
+                         " helper=" + (helperOk ? "OK" : "NG") +
+                         " chain=" + (chainOk ? "OK" : "NG") +
+                         " gate=" + (gateOk ? "OK" : "NG") +
+                         " call=" + (callOk ? "OK" : "NG") +
+                         " instance=" + (noStaticOk ? "OK" : "NG") +
+                         " fallback=" + (fallbackOk ? "OK" : "NG") +
+                         " noDup=" + (dupOk ? "OK" : "NG") +
+                         " whenCard=" + (whenCardOk ? "OK" : "NG") +
+                         " off=" + (baseHasChainRule ? "skip" : (offOk ? "OK" : "NG")) +
+                         " json=" + (jsonOk ? "OK" : "NG");
+            return problems;
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-18(자유 플레이 제물 여력 가드) 코드생성을 검사한다.
+        /// 옵션 ON/OFF/① 행동 Summon 우선 세 경우만 프로필 복제로 확인하므로 화면 상태는 바뀌지 않는다.
+        /// </summary>
+        public List<string> VerifyTributeFodderUi()
+        {
+            var problems = new List<string>();
+
+            // 1) 옵션 ON → 자유 플레이 Summon 실행기 1줄 가드 + 헬퍼 1회
+            var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+            var prof = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            if (prof == null) { problems.Add("B-18: 프로필 복제 실패"); return problems; }
+            RuleMigration.Normalize(prof);
+            prof.FreePlay = true;
+            prof.FreePlayProtectExtra = true;
+            prof.Actions = new List<ActionRule>();
+            var srcOn = RuleCodeGen.Generate(prof);
+
+            var helperOk = srcOn.IndexOf("private static bool NeedsTributeFodder(ClientField f, ClientCard c)", StringComparison.Ordinal) >= 0;
+            var helperOnce = OverrideCount(srcOn, "private static bool NeedsTributeFodder(") == 1;
+            var guardOk = OverrideCount(srcOn, "ExecutorType.Summon, () => ") == 1
+                          && srcOn.IndexOf("&& !NeedsTributeFodder(Bot, Card)); // 자유 플레이: 제물 여력 없으면 소환 시도 안 함", StringComparison.Ordinal) >= 0;
+            // 필요 제물 수: 레벨 5~6 = 1, 7+ = 2
+            var levelOk = srcOn.IndexOf("int need = c.Level >= 7 ? 2 : (c.Level >= 5 ? 1 : 0);", StringComparison.Ordinal) >= 0;
+            // 엑스트라 덱 몬스터는 제물 여력으로 세지 않는다 (IsExtraDeckMonster 재사용 = 중복 정의 없음)
+            var reuseOk = srcOn.IndexOf("if (m == null || IsExtraDeckMonster(m)) continue;", StringComparison.Ordinal) >= 0
+                          && OverrideCount(srcOn, "bool IsExtraDeckMonster(") == 1;
+            if (!helperOk) problems.Add("B-18: ON 인데 NeedsTributeFodder 헬퍼 없음");
+            if (!helperOnce) problems.Add("B-18: NeedsTributeFodder 가 중복 정의됨 (CS0111 위험)");
+            if (!guardOk) problems.Add("B-18: ON 인데 자유 플레이 Summon 실행기에 가드가 없음");
+            if (!levelOk) problems.Add("B-18: 필요 제물 수 식(레벨 5~6=1 / 7+=2)이 다름");
+            if (!reuseOk) problems.Add("B-18: 엑스트라 덱 몬스터 제외가 없거나 IsExtraDeckMonster 가 중복 정의됨");
+
+            // 2) 옵션 OFF → 0회 (회귀)
+            prof.FreePlayProtectExtra = false;
+            var srcOff = RuleCodeGen.Generate(prof);
+            var offOk = srcOff.IndexOf("NeedsTributeFodder", StringComparison.Ordinal) < 0;
+            if (!offOk) problems.Add("B-18: 옵션 OFF 인데 제물 여력 가드가 생성됨");
+            var diffLines = srcOn.Split('\n').Length - srcOff.Split('\n').Length;
+
+            // 3) ① 행동으로 Summon 을 명시하면 자유 플레이 Summon 줄이 안 나가므로 가드도 붙지 않는다
+            prof.FreePlayProtectExtra = true;
+            prof.Actions.Add(new ActionRule { Priority = 1, Type = "Summon", Card = 100458018 });
+            var srcAction = RuleCodeGen.Generate(prof);
+            var actionOk = srcAction.IndexOf("NeedsTributeFodder", StringComparison.Ordinal) < 0
+                           && srcAction.IndexOf("AddExecutor(ExecutorType.Summon, 100458018", StringComparison.Ordinal) >= 0;
+            if (!actionOk) problems.Add("B-18: ① 행동 Summon 규칙까지 가드가 붙었거나 행동 규칙이 사라짐");
+
+            B18Metrics = "helper=" + (helperOk ? "OK" : "NG") +
+                         " once=" + (helperOnce ? "OK" : "NG") +
+                         " guard=" + (guardOk ? "OK" : "NG") +
+                         " level=" + (levelOk ? "OK" : "NG") +
+                         " reuse=" + (reuseOk ? "OK" : "NG") +
+                         " off=0/" + (offOk ? "OK" : "NG") +
+                         " onOffLines=" + diffLines +
+                         " actionSummon=" + (actionOk ? "OK" : "NG");
+            return problems;
+        }
+
+        /// <summary>생성 소스에서 특정 문자열(오버라이드 서명)의 개수</summary>
+        private static int OverrideCount(string src, string needle)
+        {
+            var n = 0;
+            var i = src.IndexOf(needle, StringComparison.Ordinal);
+            while (i >= 0)
+            {
+                n++;
+                i = src.IndexOf(needle, i + needle.Length, StringComparison.Ordinal);
+            }
+            return n;
         }
 
         // ================= 카드 선택 =================

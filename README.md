@@ -123,7 +123,7 @@ A and B or C   →   ((A && B) || C)
 | `hasInHand` / `hasInGraveyard` / `hasOnField` | 특정 카드 보유 | | ✓ | me/enemy |
 | `fieldHasLevel` / `fieldHasRank` / `fieldHasLink` | 필드에 해당 레벨/랭크/링크 수치의 몬스터 | ✓ (수치) | | me/enemy |
 | `fieldHasRace` | 필드에 특정 종족 몬스터 | | | me/enemy + 종족 |
-| `fieldHasTheme` / `handHasTheme` / `gyHasTheme` | 해당 **테마(아키타입)** 카드가 필드/패/묘지에 있음 | | | me/enemy + 테마 |
+| `fieldHasTheme` / `handHasTheme` / `gyHasTheme` | 해당 **테마(아키타입)** 카드가 필드/패/묘지에 있음 (`monsterOnly` = 테마 몬스터만) | | | me/enemy + 테마 |
 | `oppMonsterActivated` / `oppSpellActivated` / `oppTrapActivated` | 지금 체인에서 **상대가 마지막으로 발동한 카드**가 몬스터/마법/함정 | | | 상대 고정 |
 | `enemyFieldEmpty` / `enemyHasNoMonster` | 상대 필드 상태 | | | |
 | `cardIsMonster` / `cardIsSpell` / `cardIsTrap` | 이 카드 종류 | | | |
@@ -135,6 +135,10 @@ A and B or C   →   ((A && B) || C)
 > `레벨/랭크/링크` 는 **값 0** 이 전체를 뜻한다 — 레벨 0 = 아무 일반 몬스터, 랭크 0 = 아무 엑시즈, 링크 0 = 아무 링크 몬스터.
 
 비교: `>= <= == != > <`
+
+> **조건 부정 / 테마 몬스터만** (UI 조건 그리드의 `부정(!)` · `몬스터만` 열):
+> `not: true` → 식이 `!(...)` 로 감싸진다(수치 비교 포함). `monsterOnly: true` 는 테마 조건에서
+> `Data.Type & 0x1`(몬스터)까지 검사한다 → 예) "패에 레이즈문 **몬스터**가 없다" = `!(HandHasThemeMonster(...))`.
 
 #### 이벤트 조건 — 이번 턴에 무슨 일이 있었는지
 
@@ -187,7 +191,25 @@ AddExecutor(ExecutorType.Activate, 14558128, () => (EventCount(Enemy, 8) >= 2));
 | `SelectPlace` | 존 선택 (첫 빈 존 또는 지정 인덱스) |
 | `SelectPosition` | 표시형식 (공격 우선 / 수비 우선) |
 
-정책(`pick`): `enemyHighestAttack`(공격력↓), `enemyLowestAttack`(공격력↑), `enemyHighestDefense`, `lowestLevel`, `codeMatch`(+`card`), `firstAvailable`
+정책(`pick`): `enemyHighestAttack`(공격력↓), `enemyLowestAttack`(공격력↑), `enemyHighestDefense`, `lowestLevel`, `codeMatch`(+`card`), `themeMatch`, `firstAvailable`
+
+**`themeMatch`(테마 카드 우선)** — 테마 setcode(+몬스터만)에 맞는 카드를 후보 순서대로 `max` 장 고른다.
+`excludeCards` 로 특정 카드를 뺀다. **고를 카드가 없으면 그 규칙을 건너뛰고 다음 우선순위 규칙으로** 넘어간다.
+
+```json
+{ "on": "SelectCard", "whenCard": 100458025, "pick": "themeMatch",
+  "themeCode": 484, "themeMonsterOnly": true, "excludeCards": [100458021] }
+```
+
+**`optionDesc`(옵션 식별)** — 같은 카드가 `SelectOption` 을 여러 번 띄울 때(효과 선택 → 위/아래)
+**옵션 문자열 ID** 로 구분한다. 옵션 목록에 그 값이 있을 때만 규칙이 적용된다.
+
+```json
+{ "on": "SelectOption", "whenCard": 100458025, "optionDesc": 1607328404, "optionIndex": 1 }
+```
+
+> 매칭되는 desc 규칙이 없으면 `base.OnSelectOption`(기본 AI)으로 넘어간다.
+> 항상 유효한 인덱스를 보장하려면 `optionDesc` 없는(0) 무조건 규칙을 **맨 마지막 우선순위**에 둔다.
 
 **`whenCard`** — 그 카드를 발동/처리 중일 때만 적용되는 대상 지정 규칙.
 `whenCard` 가 0인 규칙은 기본값으로 사용된다.
@@ -212,6 +234,7 @@ return Pick(cards, max, 0, 0);
 |---|---|---|
 | `Activate` | 발동 금지 | `OnPreActivate(card) → false` (**하드 veto**, GameAI가 직접 검사) |
 | `NoTargetMy*` | 내 카드/필드에 대하여 발동 금지 | `OnPreActivate` veto: 체인 **대상**이 내 카드이거나, 대상이 없는 효과면 **마지막 체인 링크**가 내 필드 카드일 때 |
+| `ActivateChainToMine` | **내 카드에 체인하여 발동 금지** (상대 카드에 체인은 허용) | `OnPreActivate` veto: `ChainRespondsToMine()` = `Duel.CurrentChain` **마지막 링크**의 `Controller == 0` |
 | `Summon` | 일반 소환 금지(세트 유도) | `OnSelectMonsterSummonOrSet → true` + `AddExecutor(Summon, id, () => false)` |
 | `Attack` | 공격 금지 | `OnBattle` 에서 공격자 목록 필터 |
 | `Target` | 효과 대상 선택 금지 | `OnSelectCard` 후보에서 제외 |
@@ -420,11 +443,17 @@ EDOPro 가 직접 띄운 봇(인자 없음)에서도 엔진별 대사가 적용�
      · 아래쪽 **덱 내 카드 검색**: `카드명 ×장수 [구역]` 표시, 더블클릭/버튼으로 1장 제거
    - 덱을 선택하면 같은 이름의 엔진 규칙 JSON 이 자동으로 함께 로드된다
 ①-2 "⚙ AI 설정" 탭 — 엔진 설정 + 저장/컴파일
-   - 위: 설정 카드 2열 (엔진명/설명 · 자유 플레이 · 효과번호 기록 · 가위바위보 · 선공/후공 · 대사
-     / 체인 중복 기준 · 열 회피 카드) — 창이 낮으면 **[설정 접기]** 로 공간을 넓힌다
+   - 위: 설정 카드 2열 (엔진명/설명 · 자유 플레이 · **자유 플레이 시 마법/함정도 세트** · 효과번호 기록 ·
+     가위바위보 · 선공/후공 · 대사 / 체인 중복 기준 · 열 회피 카드 · 같은 이름 카드)
+     — 창이 낮으면 **[설정 접기]** 로 공간을 넓힌다
+   - "자유 플레이 시 마법/함정도 세트"를 켜면 **종류**(전체/함정만/속공만)와 **제외 카드**가 나타난다.
+     함정·속공은 패에서 발동할 수 없어 세트만 가능한데, 이 옵션이 없으면 패에 썩는다.
+   - "자유 플레이 시 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음" (**기본 ON**) —
+     제물/릴리스 **후보**에서 융합·싱크로·엑시즈·링크 몬스터를 뺀다. 소재(융합/싱크로/엑시즈/링크 소환)는 그대로 쓴다.
+     후보가 `min` 미만이면 엔진 오류를 막기 위해 **원래 목록으로 폴백**한다.
    - 아래: [규칙 저장][규칙 불러오기][소스 미리보기][생성 + 컴파일] + **현재 규칙 요약**
      (행동 N · 선택 N · 금지 N · 트리거 N · 선공 루트 N벌 / 후공 N벌) + 빌드 로그
-①-3 규칙 탭 ①~⑤ (최상위 탭 — 2026-10-27 B-8 로 중첩 제거)
+①-3 규칙 탭 ①~⑤ (⚙ AI 설정 안의 **서브탭** — 2026-10-27 B-9)
    - ① 행동·조건 / ② 선택 규칙 / ③ 금지 규칙 / ④ 트리거 / ⑤ 전개 루트
    - ⑤ 는 왼쪽 **루트 목록** · 오른쪽 **단계 카드** · 아래 **진입/순위 조건** 으로 나뉜다
      (창 1100x700 에서도 목록·단계가 보이도록 최소 높이 확보)

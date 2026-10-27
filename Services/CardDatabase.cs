@@ -15,6 +15,9 @@ namespace WindBotAIEditor.Services
         private readonly List<SqliteConnection> _conns = new();
         private readonly Dictionary<int, string> _nameCache = new();
 
+        /// <summary>B-12: 카드 ID → 같은 이름 ID 목록 (지연 생성 · cdb 재로드 시 무효화)</summary>
+        private Dictionary<int, IReadOnlyList<int>>? _aliasIndex;
+
         public IReadOnlyList<string> Paths => _paths;
         private readonly List<string> _paths = new();
 
@@ -60,6 +63,7 @@ namespace WindBotAIEditor.Services
             _conns.Clear();
             _paths.Clear();
             _nameCache.Clear();
+            _aliasIndex = null;
         }
 
         public void Dispose() => Close();
@@ -88,6 +92,91 @@ namespace WindBotAIEditor.Services
             }
             _nameCache[id] = name;
             return name;
+        }
+
+        /// <summary>
+        /// B-12: 같은 이름 카드(대체 일러 / 재록)의 ID 목록. 첫 번째는 항상 요청한 <paramref name="id"/>.
+        /// 로드된 모든 cdb 에서 name → id[] 맵을 만들고, 이름 집합이 하나라도 겹치면 같은 그룹으로 본다(전이 1단계).
+        /// 이름 비교는 Trim() + 대소문자 무시. 이름이 없는 카드는 자기 자신만.
+        /// </summary>
+        public IReadOnlyList<int> AliasesOf(int id)
+        {
+            if (id <= 0) return Array.Empty<int>();
+            var index = EnsureAliasIndex();
+            if (index.TryGetValue(id, out var list)) return list;
+            list = new[] { id };          // 이름이 없는 카드(커스텀) — 자기 자신만
+            index[id] = list;
+            return list;
+        }
+
+        /// <summary>별칭 인덱스가 만들어졌는지 (진단용)</summary>
+        public bool HasAliasIndex => _aliasIndex != null;
+
+        /// <summary>별칭 그룹이 2개 이상인 카드 수 (진단용 — 인덱스가 없으면 만든다)</summary>
+        public int AliasGroupCount
+        {
+            get
+            {
+                var index = EnsureAliasIndex();
+                return index.Values.Count(v => v.Count > 1);
+            }
+        }
+
+        /// <summary>
+        /// name → id[] + id → name[] 를 한 번만 만들어 캐시한다.
+        /// (같은 이름이 여러 언어 cdb 에 흩어져 있어도 합집합으로 묶는다)
+        /// </summary>
+        private Dictionary<int, IReadOnlyList<int>> EnsureAliasIndex()
+        {
+            if (_aliasIndex != null) return _aliasIndex;
+
+            var namesById = new Dictionary<int, HashSet<string>>();
+            var idsByName = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var conn in _conns)
+            {
+                try
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT id, name FROM texts WHERE name IS NOT NULL AND name <> ''";
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        var cid = r.GetInt32(0);
+                        var name = (r.IsDBNull(1) ? "" : (Convert.ToString(r.GetValue(1)) ?? "")).Trim();
+                        if (name.Length == 0) continue;
+
+                        if (!namesById.TryGetValue(cid, out var set))
+                        {
+                            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            namesById[cid] = set;
+                        }
+                        set.Add(name);
+
+                        if (!idsByName.TryGetValue(name, out var ids))
+                        {
+                            ids = new List<int>();
+                            idsByName[name] = ids;
+                        }
+                        if (!ids.Contains(cid)) ids.Add(cid);
+                    }
+                }
+                catch { /* 깨진 cdb 는 건너뛴다 */ }
+            }
+
+            var index = new Dictionary<int, IReadOnlyList<int>>(namesById.Count);
+            foreach (var kv in namesById)
+            {
+                var group = new SortedSet<int> { kv.Key };
+                foreach (var name in kv.Value)
+                {
+                    if (!idsByName.TryGetValue(name, out var ids)) continue;
+                    foreach (var other in ids) group.Add(other);
+                }
+                index[kv.Key] = group.Count == 1 ? new[] { kv.Key } : group.ToList();
+            }
+            _aliasIndex = index;
+            return index;
         }
 
         /// <summary>이름으로 카드 ID 역검색 — 원본(alias=0) 우선, 그 다음 낮은 ID</summary>
