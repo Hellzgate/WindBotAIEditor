@@ -146,6 +146,17 @@ public partial class App : Application
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
 
+            // B-20: 조건 2종 (엑몹존 특정 카드 / 필드 레벨 N 몬스터 M장)
+            total = problems.Count;
+            problems.AddRange(w.VerifyB20Ui());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // B-21: 복합 조건 (테마·종족 엑시즈) + SelectOption 디버그 로그
+            total = problems.Count;
+            problems.AddRange(w.VerifyB21Ui());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             Console.WriteLine(problems.Count == 0 ? "UICHECK OK" : "UICHECK FAIL " + problems.Count);
             Console.WriteLine("tabs=" + w.MainTabCount +
                               " ruleSubTabs=" + w.RuleSubTabCount +
@@ -170,6 +181,8 @@ public partial class App : Application
             Console.WriteLine("b16 " + w.B16Metrics);
             Console.WriteLine("b17 " + w.B17Metrics);
             Console.WriteLine("b18 " + w.B18Metrics);
+            Console.WriteLine("b20 " + w.B20Metrics);
+            Console.WriteLine("b21 " + w.B21Metrics);
             Console.WriteLine("profile=" + (profilePath == null ? "(없음)" : Path.GetFileName(profilePath) + (loaded ? " OK" : " FAIL")) +
                               " summary=\"" + w.RuleSummaryText + "\"");
             return problems.Count == 0 ? 0 : 1;

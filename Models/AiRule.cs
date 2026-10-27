@@ -114,6 +114,12 @@ namespace WindBotAIEditor.Models
         public string Op { get; set; } = ">=";
         public int Value { get; set; }
 
+        /// <summary>
+        /// B-20: 장수(개수) — <c>fieldLevelCount</c> 에서 "N레벨 몬스터가 M장 이상" 의 M.
+        /// 구형 JSON 에는 키가 없으므로 0 으로 읽히고, 0 이면 1장으로 취급한다.
+        /// </summary>
+        public int Count { get; set; }
+
         public int Card
         {
             get => _card;
@@ -930,6 +936,9 @@ namespace WindBotAIEditor.Models
         /// <summary>테마(아키타입) 선택이 필요한 조건</summary>
         public bool NeedsTheme { get; set; }
 
+        /// <summary>B-21: 종족(RaceId) 선택을 함께 쓰는 조건 (<c>fieldHasThemeRaceXyz</c>)</summary>
+        public bool NeedsRace { get; set; }
+
         public static readonly List<ConditionKind> All = new List<ConditionKind>
         {
             new ConditionKind { Id = "enemyMonsterCount", Label = "상대 필드 몬스터 수", NeedsValue = true },
@@ -955,6 +964,10 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "fieldHasLink",  Label = "필드에 링크 N 몬스터 있음", NeedsValue = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasRace",  Label = "필드에 특정 종족 몬스터 있음", NeedsValue = false, NeedsSide = true },
             new ConditionKind { Id = "fieldHasTunerLevel", Label = "필드에 N레벨 튜너 몬스터 있음", NeedsValue = true, NeedsSide = true },
+            new ConditionKind { Id = "fieldCardInEmz", Label = "필드(엑몹존)에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+            new ConditionKind { Id = "fieldLevelCount", Label = "필드에 레벨 N 몬스터 M장 이상", NeedsValue = true, NeedsSide = true },
+            // B-21: 같은 카드가 테마 + 종족 + 엑시즈를 모두 만족해야 한다 (조건 3개로 쪼개면 다른 카드끼리도 통과)
+            new ConditionKind { Id = "fieldHasThemeRaceXyz", Label = "필드에 테마·종족 엑시즈 몬스터 있음", NeedsValue = false, NeedsSide = true, NeedsTheme = true, NeedsRace = true },
             new ConditionKind { Id = "amFirst",  Label = "내가 선공일 때", NeedsValue = false },
             new ConditionKind { Id = "amSecond", Label = "내가 후공일 때", NeedsValue = false },
             new ConditionKind { Id = "fieldHasTheme", Label = "필드에 테마 몬스터 있음", NeedsValue = false, NeedsSide = true, NeedsTheme = true },

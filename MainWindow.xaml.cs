@@ -746,7 +746,7 @@ namespace WindBotAIEditor
             for (int g = 0; g < sources.Count; g++)
             {
                 foreach (var c in sources[g].Conditions)
-                    list.Add(new Condition { Kind = c.Kind, Op = c.Op, Value = c.Value, Card = c.Card, Side = c.Side, Join = c.Join });
+                    list.Add(new Condition { Kind = c.Kind, Op = c.Op, Value = c.Value, Count = c.Count, Card = c.Card, Side = c.Side, Join = c.Join, Not = c.Not, MonsterOnly = c.MonsterOnly, RaceId = c.RaceId, ThemeCode = c.ThemeCode });
                 // 그룹 경계: 두 번째 그룹부터는 OR 로 연결
                 int first = list.Count - sources[g].Conditions.Count;
                 if (g > 0) list[first].Join = "or";
@@ -1737,6 +1737,12 @@ namespace WindBotAIEditor
         /// <summary>B-18 검증 요약 (--uicheck 출력용)</summary>
         public string B18Metrics { get; private set; } = "(없음)";
 
+        /// <summary>B-20 검증 요약 (--uicheck 출력용)</summary>
+        public string B20Metrics { get; private set; } = "(없음)";
+
+        /// <summary>B-21 검증 요약 (--uicheck 출력용)</summary>
+        public string B21Metrics { get; private set; } = "(없음)";
+
         /// <summary>창을 표시하지 않고 레이아웃만 갱신 (템플릿/바인딩 생성)</summary>
         private void Relayout()
         {
@@ -2451,7 +2457,7 @@ namespace WindBotAIEditor
                 Note = string.IsNullOrWhiteSpace(src.Note) ? "분기" : src.Note + " (분기)"
             };
             foreach (var c in src.Conditions)
-                copy.Conditions.Add(new Condition { Kind = c.Kind, Op = c.Op, Value = c.Value, Card = c.Card, Side = c.Side, Join = c.Join });
+                copy.Conditions.Add(new Condition { Kind = c.Kind, Op = c.Op, Value = c.Value, Count = c.Count, Card = c.Card, Side = c.Side, Join = c.Join, Not = c.Not, MonsterOnly = c.MonsterOnly, RaceId = c.RaceId, ThemeCode = c.ThemeCode });
 
             _actions.Add(copy);
             GridActions.SelectedIndex = _actions.Count - 1;
@@ -2468,6 +2474,198 @@ namespace WindBotAIEditor
         {
             if (GridConds.SelectedItem is not Condition c) { MessageBox.Show("조건 행을 먼저 선택하세요."); return; }
             if (PickCard(c.Card) is int v) { c.Card = v; GridConds.Items.Refresh(); }
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-20(조건 2종 — 엑몹존 특정 카드 / 필드 레벨 N 몬스터 M장) UI·코드생성을 검사한다.
+        /// 조건 종류 노출 → 프로필 복제에 조건 2개를 넣어 생성(헬퍼/식/별칭) → 조건 없음 회귀 → JSON 왕복.
+        /// 프로필 객체를 복제해서 검사하므로 화면 상태는 바뀌지 않는다.
+        /// </summary>
+        public List<string> VerifyB20Ui()
+        {
+            var problems = new List<string>();
+
+            // 1) 조건 종류 목록(①~⑤ 조건 콤보가 바인딩하는 정적 목록)에 2종이 있는지
+            var emzKind = ConditionKinds.FirstOrDefault(k => k.Id == "fieldCardInEmz");
+            var cntKind = ConditionKinds.FirstOrDefault(k => k.Id == "fieldLevelCount");
+            var kindOk = emzKind != null && emzKind.Label == "필드(엑몹존)에 특정 카드"
+                         && emzKind.NeedsCard && emzKind.NeedsSide && !emzKind.NeedsValue
+                         && cntKind != null && cntKind.Label == "필드에 레벨 N 몬스터 M장 이상"
+                         && cntKind.NeedsValue && cntKind.NeedsSide;
+            if (!kindOk) problems.Add("B-20: 조건 종류 목록에 fieldCardInEmz / fieldLevelCount 가 없거나 플래그가 다름");
+
+            // 2) ① 행동 조건으로 2종을 넣어 생성 → 헬퍼/식 확인
+            var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+            var prof = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            if (prof == null) { problems.Add("B-20: 프로필 복제 실패"); return problems; }
+            RuleMigration.Normalize(prof);
+            prof.Actions.Add(new ActionRule
+            {
+                Priority = 1, Type = "SpSummon", Card = 100458023, SummonZone = "main", SummonPosition = "defense",
+                Conditions =
+                {
+                    new Condition { Kind = "fieldCardInEmz", Card = 100458022, Side = "me", Join = "and" },
+                    new Condition { Kind = "fieldLevelCount", Value = 7, Count = 2, Side = "me", Join = "and" }
+                }
+            });
+            var src = RuleCodeGen.Generate(prof);
+
+            var emzHelperOk = src.IndexOf("private static bool FieldHasCardInEmz(ClientField f, int code)", StringComparison.Ordinal) >= 0
+                              && src.IndexOf("int start = f.MonsterZone.Length - 2;", StringComparison.Ordinal) >= 0;
+            var cntHelperOk = src.IndexOf("private static int CountLevels(ClientField f, int level, bool onlyMonster)", StringComparison.Ordinal) >= 0;
+            var emzOnce = OverrideCount(src, "FieldHasCardInEmz(ClientField ") == 1;
+            var cntOnce = OverrideCount(src, "CountLevels(ClientField ") == 1;
+            var emzCallOk = src.IndexOf("FieldHasCardInEmz(Bot, 100458022)", StringComparison.Ordinal) >= 0;
+            var cntCallOk = src.IndexOf("CountLevels(Bot, 7, true) >= 2", StringComparison.Ordinal) >= 0;
+            var monoOk = src.IndexOf("(c.Data.Type & 0x1) == 0", StringComparison.Ordinal) >= 0;
+            if (!emzHelperOk) problems.Add("B-20: FieldHasCardInEmz 헬퍼(EMZ = length-2)가 생성되지 않음");
+            if (!cntHelperOk) problems.Add("B-20: CountLevels 헬퍼가 생성되지 않음");
+            if (!emzOnce || !cntOnce) problems.Add("B-20: 헬퍼가 중복 정의됨 (CS0111 위험)");
+            if (!emzCallOk) problems.Add("B-20: fieldCardInEmz 조건식이 다름");
+            if (!cntCallOk) problems.Add("B-20: fieldLevelCount 조건식이 다름");
+            if (!monoOk) problems.Add("B-20: CountLevels 몬스터 판정(Data.Type & 0x1)이 없음");
+
+            // 3) Count 0 → 1장으로 취급 (하위 호환)
+            prof.Actions[prof.Actions.Count - 1].Conditions[1].Count = 0;
+            var srcZero = RuleCodeGen.Generate(prof);
+            var zeroOk = srcZero.IndexOf("CountLevels(Bot, 7, true) >= 1", StringComparison.Ordinal) >= 0;
+            if (!zeroOk) problems.Add("B-20: Count 0 일 때 1장으로 보정되지 않음");
+
+            // 4) 회귀: 조건이 없으면 헬퍼 0회 (라이브 프로필에 조건이 있어도 오탐하지 않도록 빈 프로필로 검사)
+            prof.Actions.RemoveAt(prof.Actions.Count - 1);
+            var srcOff = RuleCodeGen.Generate(new AiProfile());
+            var offOk = srcOff.IndexOf("FieldHasCardInEmz", StringComparison.Ordinal) < 0
+                        && srcOff.IndexOf("CountLevels", StringComparison.Ordinal) < 0;
+            if (!offOk) problems.Add("B-20: 조건이 없는데 EMZ/레벨 카운트 코드가 생성됨");
+
+            // 5) JSON 왕복: count 가 유지되고, 키가 없으면 0
+            var rt = JsonSerializer.Deserialize<AiProfile>(JsonSerializer.Serialize(prof, WindBotProject.JsonOpts), WindBotProject.JsonOpts);
+            var rtCond = new Condition { Kind = "fieldLevelCount", Value = 7, Count = 2 };
+            var rtCond2 = JsonSerializer.Deserialize<Condition>(
+                JsonSerializer.Serialize(rtCond, WindBotProject.JsonOpts), WindBotProject.JsonOpts);
+            var legacyCond = JsonSerializer.Deserialize<Condition>("{\"kind\":\"fieldLevelCount\",\"value\":7}", WindBotProject.JsonOpts);
+            var jsonOk = rt != null && rtCond2 != null && rtCond2.Count == 2
+                         && legacyCond != null && legacyCond.Count == 0;
+            if (!jsonOk) problems.Add("B-20: JSON 왕복(count 유지 / 키 없음=0) 실패");
+
+            B20Metrics = "kind=" + (kindOk ? "OK" : "NG") +
+                         " emz=" + (emzHelperOk ? "OK" : "NG") +
+                         " cnt=" + (cntHelperOk ? "OK" : "NG") +
+                         " once=" + ((emzOnce && cntOnce) ? "OK" : "NG") +
+                         " emzCall=" + (emzCallOk ? "OK" : "NG") +
+                         " cntCall=" + (cntCallOk ? "OK" : "NG") +
+                         " monster=" + (monoOk ? "OK" : "NG") +
+                         " zero=" + (zeroOk ? "OK" : "NG") +
+                         " off=" + (offOk ? "OK" : "NG") +
+                         " json=" + (jsonOk ? "OK" : "NG");
+            return problems;
+        }
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-21(복합 조건 "필드에 테마·종족 엑시즈 몬스터 있음" + SelectOption 디버그 로그)을 검사한다.
+        /// 조건 종류 노출 → 프로필 복제로 생성(헬퍼/식/0=무관) → 조건 없음 회귀 → debugEffectLog ON/OFF 로그 → JSON 왕복.
+        /// 프로필 객체를 복제해서 검사하므로 화면 상태는 바뀌지 않는다.
+        /// </summary>
+        public List<string> VerifyB21Ui()
+        {
+            var problems = new List<string>();
+
+            // 1) 조건 종류 목록에 fieldHasThemeRaceXyz 가 있는지 (+ 테마·종족 플래그)
+            var kind = ConditionKinds.FirstOrDefault(k => k.Id == "fieldHasThemeRaceXyz");
+            var kindOk = kind != null && kind.Label == "필드에 테마·종족 엑시즈 몬스터 있음"
+                         && kind.NeedsTheme && kind.NeedsRace && kind.NeedsSide && !kind.NeedsValue && !kind.NeedsCard;
+            if (!kindOk) problems.Add("B-21: 조건 종류 목록에 fieldHasThemeRaceXyz 가 없거나 플래그(테마/종족/대상)가 다름");
+
+            // 2) ① 행동 조건으로 생성 → 헬퍼 1회 + 식 + HasSetcode
+            var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+            var prof = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            if (prof == null) { problems.Add("B-21: 프로필 복제 실패"); return problems; }
+            RuleMigration.Normalize(prof);
+            prof.Choices.Clear();
+            prof.DebugEffectLog = false;
+            prof.Actions.Add(new ActionRule
+            {
+                Priority = 1, Type = "SpSummon", Card = 100458024, SummonZone = "main", SummonPosition = "defense",
+                Conditions =
+                {
+                    new Condition { Kind = "fieldHasThemeRaceXyz", Side = "me", Join = "and", ThemeCode = 484, RaceId = 0x2 }
+                }
+            });
+            var src = RuleCodeGen.Generate(prof);
+
+            var helperOk = src.IndexOf("private static bool FieldHasThemeRaceXyz(ClientField f, int theme, ulong race)", StringComparison.Ordinal) >= 0
+                           && src.IndexOf("if ((c.Type & 0x800000) == 0) continue;", StringComparison.Ordinal) >= 0
+                           && src.IndexOf("if (race != 0 && (c.Race & race) == 0) continue;", StringComparison.Ordinal) >= 0
+                           && src.IndexOf("if (theme != 0 && !HasSetcode(c, theme)) continue;", StringComparison.Ordinal) >= 0;
+            var onceOk = OverrideCount(src, "FieldHasThemeRaceXyz(ClientField ") == 1;
+            var callOk = src.IndexOf("FieldHasThemeRaceXyz(Bot, 484, 2)", StringComparison.Ordinal) >= 0;
+            var setcodeOk = OverrideCount(src, "HasSetcode(ClientCard c, int code)") == 1;
+            if (!helperOk) problems.Add("B-21: FieldHasThemeRaceXyz 헬퍼(엑시즈/종족/테마 + 0=무관)가 생성되지 않음");
+            if (!onceOk) problems.Add("B-21: 헬퍼가 중복 정의됨 (CS0111 위험)");
+            if (!callOk) problems.Add("B-21: 조건식이 FieldHasThemeRaceXyz(Bot, 484, 2) 가 아님");
+            if (!setcodeOk) problems.Add("B-21: HasSetcode 헬퍼가 없거나 중복 정의됨");
+
+            // 3) theme=0 / race=0 → 해당 검사 생략 (0 이 무관값으로 전달된다)
+            prof.Actions[prof.Actions.Count - 1].Conditions[0].ThemeCode = 0;
+            var srcNoTheme = RuleCodeGen.Generate(prof);
+            prof.Actions[prof.Actions.Count - 1].Conditions[0].ThemeCode = 484;
+            prof.Actions[prof.Actions.Count - 1].Conditions[0].RaceId = 0;
+            var srcNoRace = RuleCodeGen.Generate(prof);
+            var zeroOk = srcNoTheme.IndexOf("FieldHasThemeRaceXyz(Bot, 0, 2)", StringComparison.Ordinal) >= 0
+                         && srcNoRace.IndexOf("FieldHasThemeRaceXyz(Bot, 484, 0)", StringComparison.Ordinal) >= 0;
+            if (!zeroOk) problems.Add("B-21: theme=0 / race=0 이 무관값(0)으로 전달되지 않음");
+
+            // 4) 회귀: 조건이 없으면 헬퍼 0회
+            prof.Actions.RemoveAt(prof.Actions.Count - 1);
+            var srcOff = RuleCodeGen.Generate(prof);
+            var offOk = srcOff.IndexOf("FieldHasThemeRaceXyz", StringComparison.Ordinal) < 0;
+            if (!offOk) problems.Add("B-21: 조건이 없는데 FieldHasThemeRaceXyz 코드가 생성됨");
+
+            // 5) SelectOption 디버그 로그: ON 이면 idx + 1회 로그, OFF 면 로그 0줄 (기존 생성 코드 유지)
+            prof.DebugEffectLog = true;
+            prof.Choices.Add(new ChoiceRule { Priority = 1, On = "SelectOption", OptionIndex = 1 });
+            var srcLog = RuleCodeGen.Generate(prof);
+            var logOk = srcLog.IndexOf("int idx = -1;", StringComparison.Ordinal) >= 0
+                        && srcLog.IndexOf("Console.WriteLine(\"[AI-EDITOR] option card=\"", StringComparison.Ordinal) >= 0
+                        && srcLog.IndexOf("return idx;", StringComparison.Ordinal) >= 0
+                        && OverrideCount(srcLog, "public override int OnSelectOption(IList<long> options)") == 1;
+            prof.DebugEffectLog = false;
+            var srcNoLog = RuleCodeGen.Generate(prof);
+            var noLogOk = srcNoLog.IndexOf("[AI-EDITOR] option card=", StringComparison.Ordinal) < 0
+                          && srcNoLog.IndexOf("int idx = -1;", StringComparison.Ordinal) < 0
+                          && srcNoLog.IndexOf("return Math.Min(1, options.Count - 1);", StringComparison.Ordinal) >= 0;
+            if (!logOk) problems.Add("B-21: debugEffectLog ON 인데 OnSelectOption 선택 로그(idx/1회)가 생성되지 않음");
+            if (!noLogOk) problems.Add("B-21: debugEffectLog OFF 인데 옵션 로그가 생성되거나 기존 생성 코드가 달라짐");
+
+            // 6) 규칙이 없어 base 로 위임하는 경우도 1회 기록 (debugEffectLog ON + 선택 규칙 0개)
+            prof.Choices.Clear();
+            prof.DebugEffectLog = true;
+            var srcBaseLog = RuleCodeGen.Generate(prof);
+            var baseLogOk = srcBaseLog.IndexOf("public override int OnSelectOption(IList<long> options)", StringComparison.Ordinal) >= 0
+                            && srcBaseLog.IndexOf("idx = base.OnSelectOption(options);", StringComparison.Ordinal) >= 0
+                            && srcBaseLog.IndexOf("[AI-EDITOR] option card=", StringComparison.Ordinal) >= 0;
+            if (!baseLogOk) problems.Add("B-21: 선택 규칙이 없을 때 base 위임 경로가 로그되지 않음");
+
+            // 7) JSON 왕복: themeCode / raceId 유지
+            var rtCond = new Condition { Kind = "fieldHasThemeRaceXyz", Side = "me", ThemeCode = 484, RaceId = 2 };
+            var rt = JsonSerializer.Deserialize<Condition>(
+                JsonSerializer.Serialize(rtCond, WindBotProject.JsonOpts), WindBotProject.JsonOpts);
+            var jsonOk = rt != null && rt.Kind == "fieldHasThemeRaceXyz" && rt.ThemeCode == 484 && rt.RaceId == 2
+                         && ConditionKind.Find("fieldHasThemeRaceXyz").NeedsRace;
+            if (!jsonOk) problems.Add("B-21: JSON 왕복(themeCode/raceId) 실패");
+
+            B21Metrics = "kind=" + (kindOk ? "OK" : "NG") +
+                         " helper=" + (helperOk ? "OK" : "NG") +
+                         " once=" + (onceOk ? "OK" : "NG") +
+                         " call=" + (callOk ? "OK" : "NG") +
+                         " setcode=" + (setcodeOk ? "OK" : "NG") +
+                         " zero=" + (zeroOk ? "OK" : "NG") +
+                         " off=" + (offOk ? "OK" : "NG") +
+                         " log=" + (logOk ? "OK" : "NG") +
+                         " nolog=" + (noLogOk ? "OK" : "NG") +
+                         " baselog=" + (baseLogOk ? "OK" : "NG") +
+                         " json=" + (jsonOk ? "OK" : "NG");
+            return problems;
         }
 
         private void OnPickChoiceCard(object sender, RoutedEventArgs e)

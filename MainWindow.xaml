@@ -473,6 +473,11 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="값" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                        <DataGridTextColumn Binding="{Binding Count, UpdateSourceTrigger=PropertyChanged}" Width="52">
+                                            <DataGridTextColumn.Header>
+                                                <TextBlock Text="장수" ToolTip="B-20: [필드에 레벨 N 몬스터 M장 이상] 조건의 M (장수). 다른 조건에서는 무시됩니다. 0 = 1장"/>
+                                            </DataGridTextColumn.Header>
+                                        </DataGridTextColumn>
                                         <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
                                         <DataGridTemplateColumn Header="카드명 (이름으로 검색)" Width="*" MinWidth="165">
                                             <DataGridTemplateColumn.CellTemplate>
@@ -637,12 +642,7 @@
                                                 <DataTemplate>
                                                     <controls:CardNameBox x:Name="BoxExcludeAdd" EmptyLabel="(제외 추가)"
                                                                           CardId="{Binding ExcludeCardAdd, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                          ToolTip="테마 카드 우선 정책에서 제외할 카드 (예: 스퀴즈 100458021)"/>
-                                                    <DataTemplate.Triggers>
-                                                        <DataTrigger Binding="{Binding IsThemeMatch}" Value="False">
-                                                            <Setter TargetName="BoxExcludeAdd" Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                    </DataTemplate.Triggers>
+                                                                          ToolTip="이 선택 규칙의 후보에서 제외할 카드 — 정책과 무관하게 적용됩니다 (예: 스퀴즈 100458021)"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -655,11 +655,6 @@
                                                         <TextBlock Text="{Binding ExcludeCardText}" FontSize="11" VerticalAlignment="Center"
                                                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding ExcludeCardText}"/>
                                                     </DockPanel>
-                                                    <DataTemplate.Triggers>
-                                                        <DataTrigger Binding="{Binding IsThemeMatch}" Value="False">
-                                                            <Setter TargetName="PnlExclude" Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                    </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -712,6 +707,11 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="값" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                        <DataGridTextColumn Binding="{Binding Count, UpdateSourceTrigger=PropertyChanged}" Width="52">
+                                            <DataGridTextColumn.Header>
+                                                <TextBlock Text="장수" ToolTip="B-20: [필드에 레벨 N 몬스터 M장 이상] 조건의 M (장수). 다른 조건에서는 무시됩니다. 0 = 1장"/>
+                                            </DataGridTextColumn.Header>
+                                        </DataGridTextColumn>
                                         <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
                                         <DataGridTemplateColumn Header="카드명 (이름으로 검색)" Width="*" MinWidth="165">
                                             <DataGridTemplateColumn.CellTemplate>
@@ -874,6 +874,11 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="값" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                        <DataGridTextColumn Binding="{Binding Count, UpdateSourceTrigger=PropertyChanged}" Width="52">
+                                            <DataGridTextColumn.Header>
+                                                <TextBlock Text="장수" ToolTip="B-20: [필드에 레벨 N 몬스터 M장 이상] 조건의 M (장수). 다른 조건에서는 무시됩니다. 0 = 1장"/>
+                                            </DataGridTextColumn.Header>
+                                        </DataGridTextColumn>
                                         <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
                                         <DataGridTemplateColumn Header="카드명 (이름으로 검색)" Width="*" MinWidth="165">
                                             <DataGridTemplateColumn.CellTemplate>
@@ -1233,6 +1238,11 @@
                                                 </DataGridTemplateColumn.CellTemplate>
                                             </DataGridTemplateColumn>
                                             <DataGridTextColumn Header="값" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                        <DataGridTextColumn Binding="{Binding Count, UpdateSourceTrigger=PropertyChanged}" Width="52">
+                                            <DataGridTextColumn.Header>
+                                                <TextBlock Text="장수" ToolTip="B-20: [필드에 레벨 N 몬스터 M장 이상] 조건의 M (장수). 다른 조건에서는 무시됩니다. 0 = 1장"/>
+                                            </DataGridTextColumn.Header>
+                                        </DataGridTextColumn>
                                             <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
                                             <DataGridTemplateColumn Header="카드명 (이름으로 검색)" Width="*" MinWidth="150">
                                                 <DataGridTemplateColumn.CellTemplate>

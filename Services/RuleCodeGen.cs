@@ -96,6 +96,15 @@ namespace WindBotAIEditor.Services
             var themePickRules = choices.Where(c => c.Pick == "themeMatch").ToList();
             // B-17: 선택 정책 "발동 중인 카드(체인)" 규칙 (우선순위 순서 = PickChainCard_<n> 번호)
             var chainPickRules = choices.Where(c => c.Pick == "chainCard").ToList();
+            // B-22: 제외 카드(excludeCards)가 있는 SelectCard 규칙 — 정책과 무관하게 후보를 먼저 거른다
+            //   (우선순위 순서 = ExcludeCodes_<n> 번호, 중복 정의 방지 위해 참조 중복 제거)
+            var excludePickRules = new List<ChoiceRule>();
+            foreach (var c in choices)
+            {
+                if (c.On != "SelectCard") continue;
+                if (c.ExcludeCards == null || !c.ExcludeCards.Any(id => id > 0)) continue;
+                if (!excludePickRules.Contains(c)) excludePickRules.Add(c);
+            }
 
             var forbids = (p.Forbids ?? new List<ForbidRule>()).OrderBy(f => f.Priority)
                 .Where(f => f.Card > 0 || f.Action == "ChainLimit").ToList();
@@ -694,7 +703,18 @@ namespace WindBotAIEditor.Services
                 bool decidedElsewhere = false;   // 무조건 적용되는 규칙을 이미 냈다 → 뒤 규칙은 죽은 코드
                 foreach (var c in rulesForCb)
                 {
+                    // B-22: 제외 카드가 있는 SelectCard 규칙은 **정책과 무관하게** 후보를 먼저 거른다.
+                    //   pool 이 min 미만이면 그 규칙을 건너뛰고 다음 규칙/기본 폴백 (억지 선택 금지).
+                    int xi = isSelectCard ? excludePickRules.IndexOf(c) + 1 : 0;
+                    string ruleSrc = srcList;
+                    if (xi > 0)
+                    {
+                        ruleSrc = "pool" + xi;
+                        sb.AppendLine("            IList<ClientCard> pool" + xi + " = ExcludeCodes_" + xi + "(" + srcList + ");   // B-22: 제외 카드 먼저 제거");
+                    }
+
                     var parts = new List<string>();
+                    if (xi > 0) parts.Add("pool" + xi + ".Count >= min");                          // 후보 부족 → 다음 규칙
                     if (c.WhenCard > 0)
                         parts.Add("((Card != null && " + IsCodeOr("Card", c.WhenCard) + ") || (ActivatingCard() != null && " + IsCodeOr("ActivatingCard()", c.WhenCard) + "))");
                     var mc = maxCond(c);
@@ -702,15 +722,15 @@ namespace WindBotAIEditor.Services
                     var cc = ChoiceGate(c);
                     if (cc != null) parts.Add("(" + cc + ")");                                    // 조건 불충족이면 다음 규칙으로
                     if (PolicyId(c.Pick) == 5 && c.Card > 0)
-                        parts.Add(CallOr(x => "HasCode(" + srcList + ", " + x + ")", c.Card));     // 후보에 없으면 다음 규칙으로
+                        parts.Add(CallOr(x => "HasCode(" + ruleSrc + ", " + x + ")", c.Card));     // 후보에 없으면 다음 규칙으로
 
                     // B-14: 테마 카드 우선 — 고를 카드가 없으면 다음 규칙으로
                     var themeCall = "";
                     if (c.Pick == "themeMatch")
                     {
                         int ti = themePickRules.IndexOf(c) + 1;
-                        themeCall = $"PickByTheme_{ti}({srcList}, {sig.MaxExpr})";
-                        parts.Add($"PickByTheme_{ti}({srcList}, 1).Count > 0");
+                        themeCall = $"PickByTheme_{ti}({ruleSrc}, {sig.MaxExpr})";
+                        parts.Add($"PickByTheme_{ti}({ruleSrc}, 1).Count > 0");
                     }
 
                     // B-17: 발동 중인 카드(체인) 우선 — 체인에 상대 카드가 후보에 없으면 다음 규칙으로
@@ -718,13 +738,13 @@ namespace WindBotAIEditor.Services
                     if (c.Pick == "chainCard")
                     {
                         int ci = chainPickRules.IndexOf(c) + 1;
-                        chainCall = $"PickChainCard_{ci}({srcList}, {sig.MaxExpr})";
-                        parts.Add($"PickChainCard_{ci}({srcList}, 1).Count > 0");
+                        chainCall = $"PickChainCard_{ci}({ruleSrc}, {sig.MaxExpr})";
+                        parts.Add($"PickChainCard_{ci}({ruleSrc}, 1).Count > 0");
                     }
 
                     var call = c.Pick == "themeMatch"
                         ? themeCall
-                        : (c.Pick == "chainCard" ? chainCall : $"Pick({srcList}, {sig.MaxExpr}, {PolicyId(c.Pick)}, {c.Card})");
+                        : (c.Pick == "chainCard" ? chainCall : $"Pick({ruleSrc}, {sig.MaxExpr}, {PolicyId(c.Pick)}, {c.Card})");
                     if (parts.Count == 0)
                     {
                         sb.AppendLine($"            return {call};");
@@ -767,11 +787,14 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        }");
             }
 
-            if (optionRules.Count > 0)
+            // B-21: debugEffectLog ON 이면 옵션 콜백 선택 결과를 콘솔에 남긴다 (규칙이 없어 base 로 위임하는 경우도 1회)
+            bool dbgOption = p.DebugEffectLog;
+            if (optionRules.Count > 0 || dbgOption)
             {
                 sb.AppendLine();
                 sb.AppendLine("        public override int OnSelectOption(IList<long> options)");
                 sb.AppendLine("        {");
+                if (dbgOption) sb.AppendLine("            int idx = -1;");
                 bool done = false;
                 foreach (var r in optionRules)
                 {
@@ -783,20 +806,36 @@ namespace WindBotAIEditor.Services
                     if (gate != null) parts.Add(gate);
                     if (r.OptionDesc > 0) parts.Add("options.Contains(" + LongLiteral(r.OptionDesc) + ")");
                     var idx = Math.Max(0, r.OptionIndex);
+                    // B-21: 로그 모드에서는 return 대신 idx 에 담아 마지막에 1회만 기록한다
+                    var pick = "options.Count == 0 ? 0 : Math.Min(" + idx + ", options.Count - 1)";
                     if (parts.Count == 0)
                     {
-                        sb.AppendLine("            if (options.Count == 0) return 0;");
-                        sb.AppendLine("            return Math.Min(" + idx + ", options.Count - 1);");
+                        if (dbgOption) sb.AppendLine("            idx = " + pick + ";");
+                        else
+                        {
+                            sb.AppendLine("            if (options.Count == 0) return 0;");
+                            sb.AppendLine("            return Math.Min(" + idx + ", options.Count - 1);");
+                        }
                         done = true;
                         break;
                     }
-                    sb.AppendLine("            if (" + string.Join(" && ", parts) + ")");
+                    sb.AppendLine("            if (" + (dbgOption ? "idx < 0 && (" + string.Join(" && ", parts) + ")" : string.Join(" && ", parts)) + ")");
                     sb.AppendLine("            {");
-                    sb.AppendLine("                if (options.Count == 0) return 0;");
-                    sb.AppendLine("                return Math.Min(" + idx + ", options.Count - 1);");
+                    if (dbgOption) sb.AppendLine("                idx = " + pick + ";");
+                    else
+                    {
+                        sb.AppendLine("                if (options.Count == 0) return 0;");
+                        sb.AppendLine("                return Math.Min(" + idx + ", options.Count - 1);");
+                    }
                     sb.AppendLine("            }");
                 }
-                if (!done) sb.AppendLine("            return base.OnSelectOption(options);   // 조건 불충족 → 기본 동작");
+                if (dbgOption)
+                {
+                    if (!done) sb.AppendLine("            if (idx < 0) idx = base.OnSelectOption(options);   // 조건 불충족 → 기본 동작 (로그는 1회)");
+                    sb.AppendLine("            Console.WriteLine(\"[AI-EDITOR] option card=\" + (Card != null ? Card.Id.ToString() : \"-\") + \" desc=\" + (options.Count > 0 ? options[0].ToString() : \"-\") + \" -> \" + idx.ToString());");
+                    sb.AppendLine("            return idx;");
+                }
+                else if (!done) sb.AppendLine("            return base.OnSelectOption(options);   // 조건 불충족 → 기본 동작");
                 sb.AppendLine("        }");
             }
 
@@ -950,15 +989,18 @@ namespace WindBotAIEditor.Services
             bool needFaceUp = allConds.Any(c => c.Kind == "enemyFaceUpCount");
             bool needFaceDown = allConds.Any(c => c.Kind == "enemyFaceDownCount");
             bool needLevel = allConds.Any(c => c.Kind == "fieldHasLevel");
+            bool needLevelCount = allConds.Any(c => c.Kind == "fieldLevelCount");   // B-20
+            bool needEmz = allConds.Any(c => c.Kind == "fieldCardInEmz");           // B-20
             bool needRank = allConds.Any(c => c.Kind == "fieldHasRank");
             bool needLink = allConds.Any(c => c.Kind == "fieldHasLink");
             bool needRace = allConds.Any(c => c.Kind == "fieldHasRace");
+            bool needThemeRaceXyz = allConds.Any(c => c.Kind == "fieldHasThemeRaceXyz");   // B-21
             bool needTuner = allConds.Any(c => c.Kind == "fieldHasTunerLevel");
             bool needEvents = allConds.Any(c => EventId(c.Kind) >= 0);
             bool needTheme = allConds.Any(c => c.Kind == "fieldHasTheme" || c.Kind == "handHasTheme" || c.Kind == "gyHasTheme");
             bool needThemeMonster = allConds.Any(c => c.MonsterOnly &&
                 (c.Kind == "fieldHasTheme" || c.Kind == "handHasTheme" || c.Kind == "gyHasTheme"));
-            bool needSetcode = needTheme || themePickRules.Count > 0;
+            bool needSetcode = needTheme || themePickRules.Count > 0 || needThemeRaceXyz;
             bool needOppAct = allConds.Any(c => c.Kind == "oppMonsterActivated" || c.Kind == "oppSpellActivated" || c.Kind == "oppTrapActivated");
             bool needMyAct = allConds.Any(c => c.Kind == "myCardActivated" || c.Kind == "myHandActivated");
             bool needPick = listChoices.Count > 0;
@@ -1068,6 +1110,44 @@ namespace WindBotAIEditor.Services
                 "                if (level == 0 || c.Level == level) return true;",
                 "            }",
                 "            return false;"));
+            // B-20: 엑스트라 몬스터 존(MonsterZone 마지막 2칸)에 특정 카드가 있는지
+            if (needEmz) sb.Append(StaticHelper("FieldHasCardInEmz", "bool", "ClientField f, int code",
+                "            if (f == null || f.MonsterZone == null) return false;",
+                "            int start = f.MonsterZone.Length - 2;   // EMZ = 마지막 2칸 (EDOPro 는 7칸 = 메인 5 + 엑몹 2)",
+                "            if (start < 0) start = 0;",
+                "            for (int i = start; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c != null && c.IsCode(code)) return true;",
+                "            }",
+                "            return false;"));
+            // B-20: 필드에서 특정 레벨 몬스터가 몇 장인지 (level 0 = 레벨 무관 = 모든 몬스터)
+            if (needLevelCount) sb.Append(StaticHelper("CountLevels", "int", "ClientField f, int level, bool onlyMonster",
+                "            if (f == null || f.MonsterZone == null) return 0;",
+                "            int n = 0;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c == null) continue;",
+                "                if ((c.Type & 0x800000) != 0) continue;    // 엑시즈는 레벨 없음(랭크)",
+                "                if ((c.Type & 0x4000000) != 0) continue;   // 링크는 레벨 없음",
+                "                if (onlyMonster && (c.Data == null || (c.Data.Type & 0x1) == 0)) continue;",
+                "                if (level == 0 ? c.Level > 0 : c.Level == level) n++;",
+                "            }",
+                "            return n;"));
+            // B-21: 같은 카드가 테마 + 종족 + 엑시즈를 모두 만족하는지 (0 = 해당 검사 생략)
+            if (needThemeRaceXyz) sb.Append(StaticHelper("FieldHasThemeRaceXyz", "bool", "ClientField f, int theme, ulong race",
+                "            if (f == null || f.MonsterZone == null) return false;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c == null || c.Data == null) continue;",
+                "                if ((c.Type & 0x800000) == 0) continue;              // 엑시즈",
+                "                if (race != 0 && (c.Race & race) == 0) continue;     // 종족 (0 = 무관)",
+                "                if (theme != 0 && !HasSetcode(c, theme)) continue;   // 테마 (0 = 무관)",
+                "                return true;",
+                "            }",
+                "            return false;"));
             if (needSetcode) EmitHasSetcodeHelper(sb);
             if (needTheme) EmitThemeHelpers(sb, needThemeMonster);
             if (needMyAct) EmitMyActivatedHelper(sb);
@@ -1109,6 +1189,9 @@ namespace WindBotAIEditor.Services
 
             // B-17: 발동 중인 카드(체인) 우선 정책 헬퍼
             if (chainPickRules.Count > 0) EmitChainPickHelpers(sb, chainPickRules);
+
+            // B-22: 제외 카드 후보 필터 헬퍼 (SelectCard 전용)
+            if (excludePickRules.Count > 0) EmitExcludeCodeHelpers(sb, excludePickRules);
 
             if (triggers.Count > 0)
             {
@@ -1561,7 +1644,11 @@ namespace WindBotAIEditor.Services
             if (!used.Contains("Activate"))
                 sb.AppendLine("            AddExecutor(ExecutorType.Activate" + activateGuard + "); // 자유 플레이");
             if (!used.Contains("MonsterSet") && !used.Contains("SummonOrSet"))
-                sb.AppendLine("            AddExecutor(ExecutorType.MonsterSet, () => " + condGuard + cardGuard + "); // 자유 플레이");
+                sb.AppendLine("            AddExecutor(ExecutorType.MonsterSet, () => " + condGuard + cardGuard
+                              + (tributeGuard ? " && !NeedsTributeFodder(Bot, Card)" : "")
+                              + (tributeGuard
+                                  ? "); // 자유 플레이: 제물 여력 없으면 세트 시도 안 함"
+                                  : "); // 자유 플레이"));
             // B-15: 함정/속공은 패에서 발동할 수 없어 세트만 가능 → 세트 실행기를 추가 (기본 OFF)
             //   소환/발동 뒤에 두어야 "먼저 소환·발동" 순서가 유지된다 (GameAI 는 등록 순서대로 판정).
             if (setSpell && !used.Contains("SpellSet"))
@@ -1844,6 +1931,32 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                picked.Add(c);");
                 sb.AppendLine("            }");
                 sb.AppendLine("            return picked;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
+        }
+
+        /// <summary>B-22: 규칙별 '제외 카드' 후보 필터 헬퍼 생성 (SelectCard 전용).</summary>
+        private static void EmitExcludeCodeHelpers(StringBuilder sb, List<ChoiceRule> excludeRules)
+        {
+            for (int n = 1; n <= excludeRules.Count; n++)
+            {
+                var r = excludeRules[n - 1];
+                var ids = (r.ExcludeCards ?? new List<int>()).Where(id => id > 0).ToList();
+                sb.AppendLine("        // B-22: 제외 카드 — 정책과 무관하게 후보에서 먼저 제거 (" + string.Join(", ", ids) + ")");
+                sb.AppendLine("        private static IList<ClientCard> ExcludeCodes_" + n + "(IList<ClientCard> cards)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            List<ClientCard> kept = new List<ClientCard>();");
+                sb.AppendLine("            if (cards == null) return kept;");
+                sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ClientCard c = cards[i];");
+                sb.AppendLine("                if (c == null) continue;");
+                foreach (var id in ids)
+                    sb.AppendLine("                if (" + IsCodeOr("c", id) + ") continue;   // 제외 카드");
+                sb.AppendLine("                kept.Add(c);");
+                sb.AppendLine("            }");
+                sb.AppendLine("            return kept;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
             }
@@ -2303,6 +2416,16 @@ namespace WindBotAIEditor.Services
         private static bool IsEnemyEvent(string kind) =>
             !string.IsNullOrEmpty(kind) && kind.EndsWith("Enemy", StringComparison.Ordinal);
 
+        /// <summary>B-20: 장수 조건의 비교 연산자 (빈 값/이상한 값은 ">=" 로 보정)</summary>
+        private static string CountOp(Condition c)
+        {
+            switch (c.Op)
+            {
+                case ">=": case "<=": case "==": case "!=": case ">": case "<": return c.Op;
+                default: return ">=";
+            }
+        }
+
         private static string ConditionText(Condition c)
         {
             switch (c.Kind)
@@ -2336,6 +2459,10 @@ namespace WindBotAIEditor.Services
                 case "fieldHasLink": return $"FieldHasLink({SideExpr(c)}, {c.Value})";
                 case "fieldHasRace": return $"FieldHasRace({SideExpr(c)}, {c.RaceId})";
                 case "fieldHasTunerLevel": return $"FieldHasTuner({SideExpr(c)}, {c.Value})";
+                case "fieldCardInEmz": return CallOr(x => "FieldHasCardInEmz(" + SideExpr(c) + ", " + x + ")", c.Card);
+                case "fieldLevelCount": return $"CountLevels({SideExpr(c)}, {c.Value}, true) {CountOp(c)} {Math.Max(1, c.Count)}";
+                // B-21: 테마 + 종족 + 엑시즈를 "같은 카드"가 모두 만족 (0 = 해당 검사 생략)
+                case "fieldHasThemeRaceXyz": return $"FieldHasThemeRaceXyz({SideExpr(c)}, {c.ThemeCode}, {c.RaceId})";
                 case "amFirst": return "Duel.IsFirst";
                 case "amSecond": return "!Duel.IsFirst";
                 case "fieldHasTheme": return c.MonsterOnly
