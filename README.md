@@ -486,3 +486,13 @@ WindBotAIEditor.exe --decktest D:\edopro\WindBot    # 덱 저장/갱신 왕복 �
 
 
 
+
+
+## License
+
+MIT — LICENSE 참고.
+
+## 다운로드
+
+빌드된 실행 파일은 [Releases](https://github.com/Hellzgate/WindBotAIEditor/releases) 에서 받을 수 있다.
+(.NET 설치 불필요 · Windows x64)
