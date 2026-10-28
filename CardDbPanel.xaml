@@ -48,6 +48,10 @@
                 <TextBox x:Name="TxtCardId" Width="110" Padding="3"/>
                 <Button Content="ID 복사" Margin="6,0,0,0" Click="OnCopyId"/>
                 <Button Content="이 ID로 규칙 카드 채우기" Margin="10,0,0,0" Click="OnApplyToRule"/>
+                <!-- B-24: 프리릴리즈 / 정규 배지 (카탈로그 분석 전에는 "(분석 중)") -->
+                <TextBlock x:Name="LblRelease" Margin="12,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                           Foreground="{DynamicResource AccentFg}" TextTrimming="CharacterEllipsis"
+                           ToolTip="EDOPro repositories 의 pre/official cdb 파일을 이름으로 비교한 결과입니다"/>
             </StackPanel>
 
             <TextBox Grid.Row="1" x:Name="TxtInfo" IsReadOnly="True" TextWrapping="Wrap"

@@ -7,9 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.3.0</Version>
-    <AssemblyVersion>1.3.0.0</AssemblyVersion>
-    <FileVersion>1.3.0.0</FileVersion>
+    <Version>1.4.0</Version>
+    <AssemblyVersion>1.4.0.0</AssemblyVersion>
+    <FileVersion>1.4.0.0</FileVersion>
     <Product>WindBot AI Editor</Product>
   </PropertyGroup>
 
@@ -27,7 +27,16 @@
     <!-- 예제/생성물은 빌드 대상에서 제외 -->
     <Compile Remove="samples\**" />
     <None Include="samples\**" />
+    <!-- B-38: 설치 프로그램 소스는 앱 빌드에서 제외 (csc 로 따로 컴파일해 exe 만 포함) -->
+    <Compile Remove="install-assets\**" />
+    <!-- (2026-10-29) 봇 패키지는 V3 형식(6파일)만 — 설치.exe/카드 데이터는 배포본에 넣지 않는다 -->
+    <None Remove="install-assets\**" />
   </ItemGroup>
 
 </Project>
+
+
+
+
+
 

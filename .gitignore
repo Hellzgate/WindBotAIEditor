@@ -17,3 +17,6 @@ _backups/
 # 임시
 *.log
 *.tmp
+
+# 개발 자산(배포물에 포함되지 않음): 설치.exe / 카드 데이터
+install-assets/

@@ -151,6 +151,54 @@ namespace WindBotAIEditor.Models
         /// <summary>테마 조건에서 사용할 setcode (0 = 전체/테마 무관)</summary>
         public int ThemeCode { get; set; }
 
+        /// <summary>
+        /// B-32: 테마 조건에서 **제외**할 카드 ID 목록 (예: 테마 몬스터지만 콤보 대상이 아닌 카드).
+        /// `handHasTheme` / `gyHasTheme` / `fieldHasTheme` 에서만 쓰인다.
+        /// </summary>
+        public List<int> ExcludeCards { get; set; } = new List<int>();
+
+        private int _excludeCardAdd;
+
+        /// <summary>B-32: 제외 카드 입력 (카드를 고르면 목록에 추가)</summary>
+        [JsonIgnore]
+        public int ExcludeCardAdd
+        {
+            get => _excludeCardAdd;
+            set
+            {
+                if (!Set(ref _excludeCardAdd, value)) return;
+                if (value <= 0) return;
+                ExcludeCards ??= new List<int>();
+                if (!ExcludeCards.Contains(value)) ExcludeCards.Add(value);
+                Raise(nameof(ExcludeCardText));
+            }
+        }
+
+        /// <summary>B-32: 제외 카드 목록이 바뀌면 표시 문자열을 갱신</summary>
+        public void NotifyExcludeCards()
+        {
+            Raise(nameof(ExcludeCardText));
+            Raise(nameof(ExcludeCardAdd));
+        }
+
+        /// <summary>B-32: 제외 카드 목록 표시</summary>
+        [JsonIgnore]
+        public string ExcludeCardText
+        {
+            get
+            {
+                if (ExcludeCards == null || ExcludeCards.Count == 0) return "";
+                var sb = new System.Text.StringBuilder();
+                foreach (var id in ExcludeCards)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    var n = Services.CardDatabase.Instance.NameOf(id);
+                    sb.Append(string.IsNullOrEmpty(n) ? id.ToString() : id.ToString() + " " + n);
+                }
+                return sb.ToString();
+            }
+        }
+
         /// <summary>DataGrid ComboBox 바인딩용 (ThemeCode 와 동기화)</summary>
         [JsonIgnore]
         public ThemeOption ThemeName
@@ -302,6 +350,31 @@ namespace WindBotAIEditor.Models
 
         /// <summary>최대 선택 수(max)가 이 값일 때만 적용 (0 = 무관)</summary>
         public int WhenMax { get; set; }
+
+        /// <summary>
+        /// B-29: 후보에서 **내성 몬스터**를 제외한다 (WindBot 내장 목록 —
+        /// `IsMonsterInvincible` / `IsShouldNotBeTarget` / `IsShouldNotBeMonsterTarget` / `IsShouldNotBeSpellTrapTarget`).
+        /// 제외 후 후보가 `min` 미만이면 이 규칙을 건너뛰고 다음 규칙으로 간다(억지 선택 금지).
+        /// 예: 금운수-마룡(93125329)의 묘지 효과 대상 — 내성 몹을 골라 효과를 날리지 않게.
+        /// </summary>
+        public bool SkipResistant { get; set; }
+
+        /// <summary>
+        /// B-25: 선택 힌트(<c>hint</c>)가 이 값일 때만 적용 (0 = 무관).
+        /// 같은 카드가 같은 콜백을 여러 번 띄울 때 구분한다
+        /// (예: 526 = 공개 확인 `HINTMSG_CONFIRM`, 504 = 묘지로 `HINTMSG_TOGRAVE`, 502 = 파괴).
+        /// 주의: `MSG_SELECT_UNSELECT_CARD`(공개/다중 선택)는 **항상 max = 1** 로 오므로
+        /// 이 값으로만 구분할 수 있다.
+        /// </summary>
+        public long WhenHint { get; set; }
+
+        /// <summary>B-25: 힌트 선택지 (DataGrid ComboBox 바인딩)</summary>
+        [JsonIgnore]
+        public HintOption WhenHintName
+        {
+            get => HintOption.Find(WhenHint);
+            set { if (value != null) WhenHint = value.Id; }
+        }
 
         /// <summary>
         /// 적용 조건 (B-6). 비어 있으면 무조건 적용(기존 동작과 동일).
@@ -666,6 +739,34 @@ namespace WindBotAIEditor.Models
         public bool SameNameAliases { get; set; } = true;
 
         /// <summary>
+        /// B-28: 카드 검색에 **에라타 전**(이름에 `(Pre-Errata)`) 카드를 표시한다. 기본 **false**(숨김).
+        /// 에라타 전 카드는 EDOPro 에서 별개 ID 이고 스크립트도 다르므로, 쓰지 않는 사용자는 검색에서 숨기는 게 안전하다.
+        /// </summary>
+        public bool ShowPreErrata { get; set; }
+
+        /// <summary>
+        /// B-36: **이길 수 있는 상대가 없으면 공격하지 않는다** (기본 true).
+        /// 모든 상대(공격 표시=공격력, 수비 표시=수비력)를 비교해 이길 수 있는 대상이 하나도 없으면
+        /// 배틀 페이즈를 종료한다. 이길 수 있으면 그 대상 중 **가장 위협적인(공격력 높은) 몬스터**를,
+        /// 그를 이길 수 있는 **가장 약한 내 몬스터**로 공격한다.
+        /// </summary>
+        public bool AttackOnlyWinnable { get; set; } = true;
+
+        /// <summary>
+        /// B-31: 소환 시 **기본 표시형식** (`attack` | `defense`). 기본 **attack**(공격 표시).
+        /// ① 행동/② 선택 규칙에서 명시하지 않은 카드는 이 값을 쓴다 (규칙 값 `any` 도 이 값을 따른다).
+        /// </summary>
+        public string DefaultSummonPosition { get; set; } = "attack";
+
+        /// <summary>B-31: 콤보 바인딩</summary>
+        [JsonIgnore]
+        public PositionOption DefaultSummonPositionName
+        {
+            get => PositionOption.Find(DefaultSummonPosition);
+            set { if (value != null) DefaultSummonPosition = value.Id; }
+        }
+
+        /// <summary>
         /// B-15: 자유 플레이에 마법/함정 세트(<c>ExecutorType.SpellSet</c>)도 추가한다. 기본 OFF.
         /// 함정·속공은 패에서 발동할 수 없어 세트만 가능하므로, 이 옵션이 없으면 패에서 썩는다.
         /// </summary>
@@ -732,6 +833,83 @@ namespace WindBotAIEditor.Models
         /// <summary>턴 제한: any | my | opponent</summary>
         public string TurnScope { get; set; } = "any";
 
+        /// <summary>B-26: 테마 일반소환·세트 금지의 테마 setcode (0 = 테마 무관 → 규칙 무시)</summary>
+        public int ThemeCode { get; set; }
+
+        /// <summary>B-26: 테마 일반소환·세트 금지에서 예외로 둘 카드 ID 목록 (N장)</summary>
+        public List<int> ThemeExceptionCards { get; set; } = new List<int>();
+
+        private int _themeExceptionAdd;
+
+        /// <summary>B-26: 예외 카드 입력 상자 (카드를 고르면 목록에 추가)</summary>
+        [JsonIgnore]
+        public int ThemeExceptionAdd
+        {
+            get => _themeExceptionAdd;
+            set
+            {
+                if (!Set(ref _themeExceptionAdd, value)) return;
+                if (value <= 0) return;
+                ThemeExceptionCards ??= new List<int>();
+                if (!ThemeExceptionCards.Contains(value)) ThemeExceptionCards.Add(value);
+                Raise(nameof(ThemeExceptionText));
+            }
+        }
+
+        /// <summary>B-26: 예외 카드 목록 표시</summary>
+        [JsonIgnore]
+        public string ThemeExceptionText
+        {
+            get
+            {
+                if (ThemeExceptionCards == null || ThemeExceptionCards.Count == 0) return "(없음)";
+                var sb = new System.Text.StringBuilder();
+                foreach (var id in ThemeExceptionCards)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    var n = Services.CardDatabase.Instance.NameOf(id);
+                    sb.Append(string.IsNullOrEmpty(n) ? id.ToString() : id + " " + n);
+                }
+                return sb.ToString();
+            }
+        }
+
+        /// <summary>B-26: 예외 카드 목록이 바뀌면 표시 문자열을 갱신한다</summary>
+        public void NotifyThemeExceptions()
+        {
+            Raise(nameof(ThemeExceptionText));
+            Raise(nameof(ThemeExceptionAdd));
+        }
+
+        /// <summary>B-26: 이 행동이 테마 일반소환·세트 금지인지 (UI 칸 표시)</summary>
+        [JsonIgnore]
+        public bool IsSummonSetTheme => Action == "SummonSetTheme";
+
+        /// <summary>B-26: 테마 콤보 바인딩</summary>
+        [JsonIgnore]
+        public ThemeOption ThemeName
+        {
+            get => Services.ThemeCatalog.Instance.Find(ThemeCode);
+            set
+            {
+                if (value == null) return;
+                ThemeCode = value.Code;
+            }
+        }
+
+        /// <summary>B-26: 예외 카드 목록 비우기 (UI 버튼)</summary>
+        [JsonIgnore]
+        public bool ClearThemeExceptions
+        {
+            get => false;
+            set
+            {
+                if (!value) return;
+                ThemeExceptionCards = new List<int>();
+                Raise(nameof(ThemeExceptionText));
+            }
+        }
+
         [JsonIgnore]
         public string CardName => Card > 0 ? Services.CardDatabase.Instance.NameOf(Card) : "";
 
@@ -761,6 +939,31 @@ namespace WindBotAIEditor.Models
             new TurnScopeOption { Id = "opponent", Label = "상대 턴에만" },
         };
         public static TurnScopeOption Find(string id) => All.Find(t => t.Id == id) ?? All[0];
+        public override string ToString() => Label;
+    }
+
+    /// <summary>B-25: 선택 힌트(hint) 선택지 — 같은 콜백을 여러 번 띄우는 카드를 구분한다</summary>
+    public class HintOption
+    {
+        public long Id { get; set; }
+        public string Label { get; set; } = "";
+        public static readonly List<HintOption> All = new List<HintOption>
+        {
+            new HintOption { Id = 0,   Label = "무관" },
+            new HintOption { Id = 526, Label = "공개 확인 (526)" },
+            new HintOption { Id = 504, Label = "묘지로 (504)" },
+            new HintOption { Id = 502, Label = "파괴 (502)" },
+            new HintOption { Id = 500, Label = "릴리스 (500)" },
+            new HintOption { Id = 505, Label = "패로 (505)" },
+            new HintOption { Id = 506, Label = "패에 추가 (506)" },
+            new HintOption { Id = 507, Label = "덱으로 (507)" },
+            new HintOption { Id = 514, Label = "앞면 표시 (514)" },
+            new HintOption { Id = 515, Label = "뒷면 표시 (515)" },
+            new HintOption { Id = 531, Label = "제물 (531)" },
+            new HintOption { Id = 549, Label = "공격 대상 (549)" },
+            new HintOption { Id = 551, Label = "효과 대상 (551)" },
+        };
+        public static HintOption Find(long id) => All.Find(t => t.Id == id) ?? All[0];
         public override string ToString() => Label;
     }
 
@@ -912,6 +1115,8 @@ namespace WindBotAIEditor.Models
             new ForbidAction { Id = "BlockEffect",     Label = "특정 효과 발동 금지 (효과번호/턴)", Hint = "지정 효과번호의 발동을 막는다 (-1 = 모든 효과)" },
             new ForbidAction { Id = "Summon",         Label = "일반 소환 금지 (세트 유도)",   Hint = "일반 소환 대신 세트한다" },
             new ForbidAction { Id = "SummonSet",      Label = "일반 소환 금지 (세트도 금지)", Hint = "일반 소환과 세트를 모두 하지 않는다" },
+            // B-26: 테마 단위 — 자유 플레이의 일반소환/세트만 막는다(특수소환은 그대로)
+            new ForbidAction { Id = "SummonSetTheme", Label = "테마 일반소환·세트 금지", Hint = "그 테마 몬스터를 자유 플레이에서 일반소환/세트하지 않는다 (특수소환은 허용, 예외 카드 N장 지정 가능)" },
             new ForbidAction { Id = "Attack",         Label = "공격 금지",                 Hint = "공격 선언을 하지 않는다" },
             new ForbidAction { Id = "Target",         Label = "효과 대상 선택 금지",         Hint = "그 카드의 효과 대상을 선택하지 않는다" },
             new ForbidAction { Id = "Release",        Label = "릴리스/소재 사용 금지",       Hint = "그 카드를 릴리스/소재로 쓰지 않는다" },
@@ -957,6 +1162,7 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "cardAttack",        Label = "이 카드의 공격력", NeedsValue = true },
             new ConditionKind { Id = "cardLevel",         Label = "이 카드의 레벨", NeedsValue = true },
             new ConditionKind { Id = "hasInHand",         Label = "패에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+              new ConditionKind { Id = "extraHas",          Label = "내 엑스트라 덱에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = false, FixedSide = "me" },   // 2026-10-29
             new ConditionKind { Id = "hasInGraveyard",    Label = "묘지에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
             new ConditionKind { Id = "hasOnField",        Label = "필드에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasLevel", Label = "필드에 레벨 N 몬스터 있음", NeedsValue = true, NeedsSide = true },

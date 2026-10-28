@@ -125,6 +125,10 @@ namespace WindBotAIEditor.Services
         private static void WriteText(string path, string text) =>
             File.WriteAllText(path, text, new UTF8Encoding(false));
 
+        /// <summary>
+        /// install.ps1 생성 — 템플릿(install-assets\install-template.ps1)을 읽어 치환한다.
+        /// 봇 항목(bots.json)은 **자동 수정하지 않고** 붙여넣기만 안내한다(EDOPro 파서가 깨진 사례).
+        /// </summary>
         private static string InstallScript(string botName, string engine, string dialogFile)
         {
             var dialogLine = dialogFile.Length > 0
@@ -209,4 +213,6 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
+
 

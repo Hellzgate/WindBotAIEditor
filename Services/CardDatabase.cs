@@ -112,6 +112,12 @@ namespace WindBotAIEditor.Services
         /// <summary>별칭 인덱스가 만들어졌는지 (진단용)</summary>
         public bool HasAliasIndex => _aliasIndex != null;
 
+        /// <summary>
+        /// B-24: 카드 ID 를 일괄 변환한 뒤 별칭 인덱스만 버린다 (연결은 유지).
+        /// 다음 <see cref="AliasesOf"/> 호출이 새 ID 로 다시 만든다.
+        /// </summary>
+        public void InvalidateAliases() => _aliasIndex = null;
+
         /// <summary>별칭 그룹이 2개 이상인 카드 수 (진단용 — 인덱스가 없으면 만든다)</summary>
         public int AliasGroupCount
         {
@@ -254,8 +260,21 @@ namespace WindBotAIEditor.Services
         }
 
         /// <summary>이름(부분)으로 검색 — 여러 DB 결과를 병합.</summary>
-        public List<CardInfo> Search(string keyword, int limit = 200)
+        /// <summary>
+        /// B-28: 에라타 전(Pre-Errata) 카드 이름인지. EDOPro 는 에라타 전 카드를 이름 뒤 `(Pre-Errata)` 로 별개 ID 로 갖는다.
+        /// </summary>
+        public static bool IsPreErrataName(string? name)
         {
+            if (string.IsNullOrEmpty(name)) return false;
+            return name.IndexOf("(Pre-Errata)", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("프리 에라타", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("프리에라타", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>B-28: 검색 결과에 에라타 전 카드를 포함할지 (기본 false = 숨김)</summary>
+        public static bool ShowPreErrata { get; set; }
+
+        public List<CardInfo> Search(string keyword, int limit = 200)        {
             var results = new List<CardInfo>();
             var seen = new HashSet<int>();
             if (!IsOpen) return results;
@@ -285,10 +304,13 @@ namespace WindBotAIEditor.Services
                     {
                         int id = r.GetInt32(0);
                         if (!seen.Add(id)) continue;
+                        string nm = r.IsDBNull(1) ? "" : r.GetString(1);
+                        // B-28: 에라타 전 카드는 기본으로 숨긴다 (⚙ AI 설정에서 표시 가능)
+                        if (!ShowPreErrata && IsPreErrataName(nm)) continue;
                         results.Add(new CardInfo
                         {
                             Id = id,
-                            Name = r.IsDBNull(1) ? "" : r.GetString(1),
+                            Name = nm,
                             Type = r.IsDBNull(2) ? 0 : r.GetInt32(2),
                             Atk = r.IsDBNull(3) ? 0 : r.GetInt32(3),
                             Def = r.IsDBNull(4) ? 0 : r.GetInt32(4),

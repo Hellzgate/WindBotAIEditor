@@ -61,6 +61,7 @@ namespace WindBotAIEditor
         };
         public static List<string> Joins => new() { "and", "or" };
         public static List<ConditionModeOption> ConditionModes => ConditionModeOption.All;
+        public static List<HintOption> HintOptions => HintOption.All;
         public static List<RaceOption> Races => RaceOption.All;
         public static ObservableCollection<ThemeOption> Themes => ThemeCatalog.Instance.All;
         public static List<ChainBasisOption> ChainBases => ChainBasisOption.All;
@@ -124,6 +125,8 @@ namespace WindBotAIEditor
             ApplyTheme(ChkDarkMode.IsChecked == true);
 
             UpdateRuleSummary();
+            // B-24: 카탈로그 스캔(백그라운드)이 끝나면 상태줄 경고를 갱신한다
+            PreReleaseCatalog.Instance.Ready += OnPreReleaseCatalogReady;
             TryAutoDetect(silent: true);
         }
 
@@ -223,9 +226,12 @@ namespace WindBotAIEditor
             OpenCardDatabase(edopro);
             ThemeCatalog.Instance.Load(edopro);
             UpdateProfilePath();
+            // B-24: 프리릴리즈 / 정규 카드 ID 매핑을 백그라운드에서 만든다 (UI 를 막지 않는다)
+            PreReleaseCatalog.Instance.StartScan(edopro);
             LoadBots();
             LoadDecks();
             RefreshDialogFiles();
+            UpdatePreReleaseWarning();
             Status("EDOPro 열림: " + edopro + " · 테마 " + ThemeCatalog.Instance.All.Count + "개");
         }
 
@@ -282,6 +288,9 @@ namespace WindBotAIEditor
             _profile.ChainBasis = (CmbChainBasis.SelectedValue as string) ?? "code";
             _profile.AvoidColumnCard = CardAvoidColumn?.CardId ?? 0;
             _profile.SameNameAliases = ChkSameNameAliases.IsChecked == true;   // B-12
+            _profile.ShowPreErrata = ChkShowPreErrata.IsChecked == true;       // B-28
+            _profile.DefaultSummonPosition = (CmbDefaultPosition.SelectedValue as string) ?? "attack";   // B-31
+            _profile.AttackOnlyWinnable = ChkAttackOnlyWinnable.IsChecked == true;   // B-36
             _profile.FreePlaySetSpell = ChkFreePlaySetSpell.IsChecked == true;                     // B-15
             _profile.FreePlaySetSpellKind = (CmbFreePlaySetKind.SelectedValue as string) ?? "all";
             _profile.FreePlaySetSpellExclude ??= new List<int>();
@@ -311,6 +320,10 @@ namespace WindBotAIEditor
             CmbChainBasis.SelectedValue = string.IsNullOrWhiteSpace(p.ChainBasis) ? "code" : p.ChainBasis;
             if (CardAvoidColumn != null) CardAvoidColumn.CardId = p.AvoidColumnCard;
             if (ChkSameNameAliases != null) ChkSameNameAliases.IsChecked = p.SameNameAliases;   // B-12
+            if (ChkAttackOnlyWinnable != null) ChkAttackOnlyWinnable.IsChecked = p.AttackOnlyWinnable;   // B-36
+            if (CmbDefaultPosition != null) CmbDefaultPosition.SelectedValue = string.IsNullOrWhiteSpace(p.DefaultSummonPosition) ? "attack" : p.DefaultSummonPosition;   // B-31
+            if (ChkShowPreErrata != null) ChkShowPreErrata.IsChecked = p.ShowPreErrata;          // B-28
+            Services.CardDatabase.ShowPreErrata = p.ShowPreErrata;
 
             // B-15: 자유 플레이 마함 세트
             p.FreePlaySetSpellExclude ??= new List<int>();
@@ -340,6 +353,7 @@ namespace WindBotAIEditor
             OnChoiceSelected(null, null);
             SetSettingsCollapsed(true);          // B-9: 규칙 프로필을 읽으면 설정 카드는 기본(접힘)으로
             UpdateProfilePath();
+            UpdatePreReleaseWarning();           // B-24: 프리릴리즈 경고(자동 변환 없음)
         }
 
         private void TryLoadProfile(string engine)
@@ -356,6 +370,7 @@ namespace WindBotAIEditor
                 SelectRouteOption(null);
                 UpdateRouteTrackUi();
                 GridActions.SelectedIndex = -1;
+                UpdatePreReleaseWarning();
                 return;
             }
             try
@@ -452,6 +467,211 @@ namespace WindBotAIEditor
                 UpdateProfilePath();
             }
             else Status("엔진 빌드 실패 — 아래 로그 확인");
+        }
+
+        // ================= 프리릴리즈 → 정규 카드 ID (B-24) =================
+
+        /// <summary>카탈로그 스캔 완료 (백그라운드 스레드) → UI 스레드에서 경고 갱신</summary>
+        private void OnPreReleaseCatalogReady()
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    UpdatePreReleaseWarning();
+                    Status("프리릴리즈 카탈로그 준비: " + PreReleaseCatalog.Instance.Stats);
+                }));
+            }
+            catch { /* 창이 닫히는 중 */ }
+        }
+
+        /// <summary>지금 화면 기준 덱 파일 이름 + 텍스트 (선택된 덱 → 없으면 엔진 이름으로 추정)</summary>
+        private (string? file, string? text) CurrentDeck()
+        {
+            if (_project == null) return (null, null);
+            var file = ListDecks?.SelectedItem as string;
+            if (string.IsNullOrEmpty(file))
+            {
+                var engine = (TxtEngineName?.Text ?? "").Trim();
+                if (engine.Length == 0) return (null, null);
+                var path = _project.DeckPath(engine);
+                if (!File.Exists(path)) return (null, null);
+                file = Path.GetFileName(path);
+                try { return (file, _project.ReadDeck(file!)); } catch { return (file, null); }
+            }
+
+            var text = TxtDeck?.Text;
+            if (string.IsNullOrEmpty(text)) { try { text = _project.ReadDeck(file!); } catch { text = null; } }
+            return (file, text);
+        }
+
+        /// <summary>
+        /// B-24: 규칙/덱에 프리릴리즈 ID 가 있으면 상태줄에 경고만 표시한다 (자동 변환 없음).
+        /// </summary>
+        private void UpdatePreReleaseWarning()
+        {
+            if (TxtPreReleaseWarn == null) return;
+            var catalog = PreReleaseCatalog.Instance;
+            if (!catalog.IsReady)
+            {
+                TxtPreReleaseWarn.Text = catalog.IsScanning ? "(프리릴리즈 분석 중)" : "";
+                TxtPreReleaseWarn.ToolTip = null;
+                return;
+            }
+
+            var ids = PreReleaseConverter.CollectIds(CurrentProfile());
+            var (_, deckText) = CurrentDeck();
+            if (!string.IsNullOrEmpty(deckText)) ids.AddRange(PreReleaseConverter.DeckIds(deckText));
+
+            var pre = ids.Where(catalog.IsPreRelease).Distinct().OrderBy(x => x).ToList();
+            var convertible = pre.Where(catalog.IsReleased).ToList();
+            if (pre.Count == 0)
+            {
+                TxtPreReleaseWarn.Text = "프리릴리즈 카드 없음";
+                TxtPreReleaseWarn.ToolTip = catalog.Stats;
+                return;
+            }
+            TxtPreReleaseWarn.Text = "프리릴리즈 " + pre.Count + "장 (정규 변환 가능 " + convertible.Count + "장)";
+            TxtPreReleaseWarn.ToolTip = "프리릴리즈 ID: " + string.Join(", ", pre.Select(x => x.ToString()).ToArray()) +
+                                        Environment.NewLine + catalog.Stats;
+        }
+
+        /// <summary>
+        /// B-24: [프리릴리즈 변환] — 규칙 + 덱의 카드 ID 중 같은 이름의 정규 카드가 있는 것만
+        /// 미리보기로 보여주고, [적용] 하면 .bak 백업 후 규칙 JSON/덱을 덮어쓴다.
+        /// </summary>
+        private void OnPreReleaseConvert(object sender, RoutedEventArgs e)
+        {
+            if (_project == null) { MessageBox.Show("EDOPro 폴더를 먼저 여세요.", "프리릴리즈 변환"); return; }
+            CommitGrids();
+
+            var catalog = PreReleaseCatalog.Instance;
+            if (!catalog.IsReady)
+            {
+                catalog.StartScan(string.IsNullOrEmpty(App.EdoproRoot) ? App.WindBotRoot : App.EdoproRoot);
+                MessageBox.Show(catalog.IsScanning
+                        ? "프리릴리즈 카탈로그를 분석 중입니다. 잠시 후 다시 눌러 주세요."
+                        : "프리릴리즈 카탈로그를 만들지 못했습니다 (EDOPro repositories 폴더 확인).",
+                    "프리릴리즈 변환");
+                return;
+            }
+
+            var profile = CurrentProfile();
+            var (deckFile, deckText) = CurrentDeck();
+            var plan = PreReleaseConverter.Build(profile, deckText);
+
+            if (plan.IsEmpty)
+            {
+                MessageBox.Show("변환할 카드가 없습니다." + Environment.NewLine + catalog.Stats,
+                    "프리릴리즈 변환");
+                Status("프리릴리즈 변환: 대상 없음 — " + catalog.Stats);
+                return;
+            }
+
+            var dlg = new PreReleasePreviewWindow(plan) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+
+            ApplyPreReleasePlan(profile, plan, deckFile);
+        }
+
+        /// <summary>
+        /// 변환 적용 — 백업(.bak-시각) → 규칙 JSON/덱 덮어쓰기 → 별칭 캐시 무효화 → 그리드·요약 새로고침.
+        /// 백업 없이는 절대 덮어쓰지 않는다.
+        /// </summary>
+        private void ApplyPreReleasePlan(AiProfile profile, PreConvertPlan plan, string? deckFile)
+        {
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var backups = new List<string>();
+            try
+            {
+                // 1) 규칙 JSON 백업 (라이브 규칙 파일 = Executors\_src\<엔진>.rules.json)
+                var rulesPath = ProfilePath;
+                if (!string.IsNullOrEmpty(rulesPath) && File.Exists(rulesPath))
+                {
+                    var bak = rulesPath + ".bak-" + stamp;
+                    File.Copy(rulesPath, bak, true);
+                    backups.Add(bak);
+                }
+
+                // 2) 덱 파일 백업
+                var deckPath = "";
+                if (deckFile != null && plan.NewDeckText != null)
+                {
+                    deckPath = _project!.DeckPath(deckFile);
+                    if (File.Exists(deckPath))
+                    {
+                        var bak = deckPath + ".bak-" + stamp;
+                        File.Copy(deckPath, bak, true);
+                        backups.Add(bak);
+                    }
+                }
+
+                // 3) 메모리 모델 변환 (+ 여기서 만든 프로필을 그대로 저장)
+                var changed = PreReleaseConverter.Apply(profile);
+
+                if (!string.IsNullOrEmpty(rulesPath))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(rulesPath)!);
+                    File.WriteAllText(rulesPath, JsonSerializer.Serialize(profile, WindBotProject.JsonOpts),
+                        new UTF8Encoding(false));
+                }
+
+                if (deckPath.Length > 0 && plan.NewDeckText != null)
+                {
+                    _project!.WriteDeck(deckFile!, plan.NewDeckText);
+                    if (string.Equals(ListDecks.SelectedItem as string, deckFile, StringComparison.OrdinalIgnoreCase))
+                        TxtDeck.Text = plan.NewDeckText.Replace("\r\n", "\n").Replace("\n", "\r\n");
+                }
+
+                // 4) 같은 이름 카드 별칭(B-12) 캐시 무효화 — 다음 조회에서 새 ID 로 다시 만든다
+                CardDatabase.Instance.InvalidateAliases();
+
+                RefreshAfterPreReleaseConvert();
+                UpdateRuleSummary();
+                UpdatePreReleaseWarning();
+
+                var lines = plan.Changes.Select(c => c.Display).ToList();
+                TxtBuildLog.Text = "[프리릴리즈 → 정규 변환] " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
+                                   Environment.NewLine +
+                                   "규칙 " + plan.RuleChangeCount + "곳" +
+                                   (plan.DeckChangeCount > 0 ? " · 덱 " + plan.DeckChangeCount + "장" : "") +
+                                   " · 필드 " + changed + "개 변경" + Environment.NewLine +
+                                   (backups.Count > 0 ? "백업: " + string.Join(Environment.NewLine + "      ", backups.ToArray())
+                                                      : "백업: (기존 파일 없음 — 새로 만듦)") + Environment.NewLine +
+                                   Environment.NewLine + string.Join(Environment.NewLine, lines.ToArray());
+
+                Status("프리릴리즈 변환 완료: 규칙 " + plan.RuleChangeCount + "곳" +
+                       (plan.DeckChangeCount > 0 ? " · 덱 " + plan.DeckChangeCount + "장" : "") +
+                       "  (WindBot 재시작 필요)");
+                MessageBox.Show("변환했습니다 — 규칙 " + plan.RuleChangeCount + "곳" +
+                                (plan.DeckChangeCount > 0 ? " · 덱 " + plan.DeckChangeCount + "장" : "") +
+                                Environment.NewLine +
+                                (backups.Count > 0 ? "백업: " + backups[0] : "백업 없음(새 파일)") +
+                                Environment.NewLine + Environment.NewLine +
+                                "엔진 DLL 은 [생성 + 컴파일] 로 다시 빌드해야 적용됩니다.",
+                    "프리릴리즈 변환");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("변환 실패: " + ex.Message + Environment.NewLine +
+                                (backups.Count > 0 ? "백업은 남아 있습니다: " + backups[0] : ""), "오류");
+            }
+        }
+
+        /// <summary>변환 후 그리드·제외 목록 표시를 다시 읽는다 (List&lt;int&gt; 는 알림이 없다)</summary>
+        private void RefreshAfterPreReleaseConvert()
+        {
+            GridActions.Items.Refresh();
+            GridConds.Items.Refresh();
+            GridChoices.Items.Refresh();
+            GridChoiceConds.Items.Refresh();
+            GridForbids.Items.Refresh();
+            GridForbidConds.Items.Refresh();
+            GridTriggers.Items.Refresh();
+            GridOpps.Items.Refresh();
+            GridRouteConds.Items.Refresh();
+            ItemsRoute?.Items.Refresh();
+            UpdateFreePlaySetExcludeText();
         }
 
         // ================= 규칙 편집 =================
@@ -589,8 +809,51 @@ namespace WindBotAIEditor
             }
         }
 
-        // ================= B-15: 자유 플레이 마법/함정 세트 =================
+        /// <summary>B-31: 기본 소환 표시형식 (공격/수비) — ① 행동에 지정이 없는 카드에 적용</summary>
+        private void OnDefaultPositionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            string pos = (CmbDefaultPosition.SelectedValue as string) ?? "attack";
+            if (_profile != null) _profile.DefaultSummonPosition = pos;
+            Status("기본 표시형식: " + (pos == "defense" ? "수비" : "공격"));
+        }
+        /// <summary>B-36: 이길 수 없으면 공격하지 않음 토글</summary>
+        private void OnAttackOnlyWinnableChanged(object sender, RoutedEventArgs e)
+        {
+            bool on = ChkAttackOnlyWinnable.IsChecked == true;
+            if (_profile != null) _profile.AttackOnlyWinnable = on;
+            Status("이길 수 없으면 공격하지 않음: " + (on ? "ON" : "OFF"));
+        }
+        /// <summary>B-32: 조건의 테마 제외 카드 목록을 비운다 (셀 안의 × 버튼)</summary>
+        private void OnClearCondExclude(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.DataContext is Condition cond)
+            {
+                cond.ExcludeCards = new List<int>();
+                cond.NotifyExcludeCards();
+                GridChoiceConds.Items.Refresh();
+                Status("조건의 테마 제외 카드 목록을 비웠습니다");
+            }
+        }
+        /// <summary>B-28: 에라타 전 카드 검색 표시 토글</summary>
+        private void OnShowPreErrataChanged(object sender, RoutedEventArgs e)
+        {
+            Services.CardDatabase.ShowPreErrata = ChkShowPreErrata.IsChecked == true;
+            if (_profile != null) _profile.ShowPreErrata = Services.CardDatabase.ShowPreErrata;
+            Status("에라타 전 카드 검색 표시: " + (Services.CardDatabase.ShowPreErrata ? "ON" : "OFF"));
+        }
+        /// <summary>B-26: 테마 일반소환·세트 금지의 예외 카드 목록을 비운다 (셀 안의 × 버튼)</summary>
+        private void OnClearForbidThemeExceptions(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.DataContext is ForbidRule f)
+            {
+                f.ThemeExceptionCards = new List<int>();
+                f.NotifyThemeExceptions();
+                GridForbids.Items.Refresh();
+                Status("테마 예외 카드 목록을 비웠습니다 (우선 " + f.Priority + ")");
+            }
+        }
 
+        // ================= B-15: 자유 플레이 마법/함정 세트 =================
         /// <summary>B-15: 체크박스 상태에 따라 종류/제외 카드 줄을 보이거나 숨긴다.</summary>
         private void UpdateFreePlaySetSpellUi()
         {
@@ -1509,6 +1772,8 @@ namespace WindBotAIEditor
                 "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
                 "ChkFreePlaySetSpell", "CmbFreePlaySetKind", "CardFreePlaySetExclude", "TxtFreePlaySetExclude", "PnlFreePlaySetSpell",
                 "ChkFreePlayProtectExtra",
+                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable",
+                "BtnPreReleaseConvert", "TxtPreReleaseWarn",
                 "TxtRuleSummary", "TxtProfilePath", "TxtBuildLog",
                 "ListDecks", "TxtDeck", "TxtDeckCardFilter", "ListDeckCards", "TxtDeckInfo",
                 "GridActions", "GridConds", "GridChoices", "GridChoiceConds", "GridForbids", "GridForbidConds",
@@ -2626,7 +2891,7 @@ namespace WindBotAIEditor
             prof.Choices.Add(new ChoiceRule { Priority = 1, On = "SelectOption", OptionIndex = 1 });
             var srcLog = RuleCodeGen.Generate(prof);
             var logOk = srcLog.IndexOf("int idx = -1;", StringComparison.Ordinal) >= 0
-                        && srcLog.IndexOf("Console.WriteLine(\"[AI-EDITOR] option card=\"", StringComparison.Ordinal) >= 0
+                        && srcLog.IndexOf("LogLine(\"[AI-EDITOR] option card=\"", StringComparison.Ordinal) >= 0   // B-27: 콘솔+파일
                         && srcLog.IndexOf("return idx;", StringComparison.Ordinal) >= 0
                         && OverrideCount(srcLog, "public override int OnSelectOption(IList<long> options)") == 1;
             prof.DebugEffectLog = false;
@@ -2665,6 +2930,202 @@ namespace WindBotAIEditor
                          " nolog=" + (noLogOk ? "OK" : "NG") +
                          " baselog=" + (baseLogOk ? "OK" : "NG") +
                          " json=" + (jsonOk ? "OK" : "NG");
+            return problems;
+        }
+
+        /// <summary>B-24 자기검사 숫자 보고용</summary>
+        public string B24Metrics { get; private set; } = "";
+
+        /// <summary>
+        /// 창을 띄우지 않고 B-24(프리릴리즈 → 정규 카드 ID 변환)를 검사한다.
+        /// (1) 버튼·경고 텍스트·카드 상세 배지 배선 (2) 리플렉션 화이트리스트 변환 — 카드 ID 필드만 바뀌고
+        /// Priority/Value/Count/ThemeCode/RaceId/ChainLimit/EffectDesc/OptionDesc 등 비-ID 필드는 그대로
+        /// (3) 덱 변환 — 섹션/개행 보존 (4) 카탈로그가 준비됐으면 실제 cdb 쌍(101104012→92586237 등) 확인.
+        /// 스텁 매핑을 쓰므로 카탈로그가 아직 없어도 (2)(3) 은 항상 검사된다. 화면·파일은 바뀌지 않는다.
+        /// </summary>
+        public List<string> VerifyB24Ui()
+        {
+            var problems = new List<string>();
+
+            // 1) 컨트롤 배선
+            var btnOk = BtnPreReleaseConvert != null
+                        && Convert.ToString(BtnPreReleaseConvert.Content) == "프리릴리즈 변환";
+            var warnOk = TxtPreReleaseWarn != null;
+            if (!btnOk) problems.Add("B-24: [프리릴리즈 변환] 버튼이 없거나 문구가 다름");
+            if (!warnOk) problems.Add("B-24: 프리릴리즈 경고 텍스트(TxtPreReleaseWarn)가 없음");
+            UpdatePreReleaseWarning();
+            var warnText = TxtPreReleaseWarn == null ? "" : TxtPreReleaseWarn.Text;
+
+            var badgeText = "";
+            var catalog = PreReleaseCatalog.Instance;
+            try
+            {
+                // 카탈로그가 준비됐으면 실제 카드로 배지 문구까지 확인한다 (읽기 전용 조회)
+                if (catalog.IsReady)
+                {
+                    CardPanel.ShowCard(92517928);          // 정규 카드
+                    var regBadge = CardPanel.ReleaseBadgeText;
+                    CardPanel.ShowCard(101104012);         // 프리릴리즈 → 정규 쌍
+                    var preBadge = CardPanel.ReleaseBadgeText;
+                    badgeText = regBadge + " / " + preBadge;
+                }
+                else
+                {
+                    CardPanel.ShowCard(0);                 // 카드 DB 조회 없이 배지 경로만 확인
+                    badgeText = CardPanel.ReleaseBadgeText;
+                }
+            }
+            catch { }
+            var badgeOk = badgeText.Length > 0 &&
+                          (!catalog.IsReady
+                              || (badgeText.StartsWith("정규 / 프리릴리즈 → 정규 92586237", StringComparison.Ordinal)));
+            if (!badgeOk) problems.Add("B-24: 카드 상세 배지(LblRelease) 문구가 다름: " + badgeText);
+
+            // 2) 리플렉션 변환 — 스텁 매핑(101104012 → 92586237)으로 카드 ID 필드만 바뀌는지
+            const int pre = 101104012;
+            const int rel = 92586237;
+            Func<int, int> stub = id => id == pre ? rel : 0;
+
+            var prof = new AiProfile { Engine = "PreProbe" };
+            var actCond = new Condition { Kind = "hasInHand", Card = pre, Value = pre, Count = pre, ThemeCode = pre, RaceId = pre, Side = "me" };
+            var act = new ActionRule { Priority = pre, Type = "Summon", Card = pre };
+            act.Conditions.Add(actCond);
+            prof.Actions.Add(act);
+
+            var choice = new ChoiceRule
+            {
+                Priority = pre, WhenMax = pre, WhenCard = pre, Card = pre,
+                OptionDesc = pre, ExcludeCards = new List<int> { pre },
+            };
+            prof.Choices.Add(choice);
+
+            prof.Forbids.Add(new ForbidRule { Priority = pre, ChainLimit = pre, Card = pre, EffectDesc = pre });
+            prof.Triggers.Add(new FinishTrigger { Card = pre, Priority = pre, Group = pre });
+            prof.OppTriggers.Add(new OppTrigger { Card = pre, ResponseCard = pre, Priority = pre });
+
+            var set = new RouteSet { Name = "프로브", IsDefault = true };
+            set.Conditions.Add(new Condition { Kind = "hasInHand", Card = pre });
+            var step = new RouteStep { Order = pre, Card = pre };
+            var opt = new RouteOption { Rank = pre, Card = pre };
+            opt.Conditions.Add(new Condition { Kind = "fieldCardInEmz", Card = pre, Value = pre, Count = pre });
+            step.Options.Add(opt);
+            set.Steps.Add(step);
+            prof.Routes.Add(set);
+
+            prof.FreePlaySetSpellExclude.Add(pre);
+            prof.AvoidColumnCard = pre;
+
+            var deck = "#created by probe\r\n#main\r\n101104012\r\n101104012\r\n\r\n#extra\r\n92517928\r\n\r\n!side\r\n101104012\r\n";
+            var plan = PreReleaseConverter.Build(prof, deck, stub);
+
+            // 규칙에서 바뀌는 자리: 행동 1 + 행동조건 1 + 선택 3(WhenCard/Card/ExcludeCards) + 금지 1 +
+            // 트리거 1 + 상대트리거 2 + 루트조건 1 + 단계(구형 Card) 1 + 순위 1 + 순위조건 1 + 세트제외 1 + 열회피 1 = 15
+            var ruleOk = plan.RuleChangeCount == 15;
+            if (!ruleOk) problems.Add("B-24: 규칙 변환 자리 수가 15가 아님(" + plan.RuleChangeCount + ") — 화이트리스트 확인");
+
+            var deckOk = plan.DeckChangeCount == 3
+                         && plan.NewDeckText != null
+                         && OverrideCount(plan.NewDeckText!, rel.ToString()) == 3
+                         && plan.NewDeckText!.Contains("#extra\r\n92517928", StringComparison.Ordinal)
+                         && plan.NewDeckText!.Contains("!side\r\n92586237", StringComparison.Ordinal);
+            if (!deckOk) problems.Add("B-24: 덱 변환이 3장/섹션 보존 조건을 만족하지 않음");
+
+            var applied = PreReleaseConverter.Apply(prof, stub);
+
+            // 카드 ID 필드: 변환됨
+            var idsOk =
+                prof.Actions[0].Card == rel && prof.Actions[0].Conditions[0].Card == rel &&
+                prof.Choices[0].WhenCard == rel && prof.Choices[0].Card == rel &&
+                prof.Choices[0].ExcludeCards[0] == rel &&
+                prof.Forbids[0].Card == rel && prof.Triggers[0].Card == rel &&
+                prof.OppTriggers[0].Card == rel && prof.OppTriggers[0].ResponseCard == rel &&
+                set.Conditions[0].Card == rel && step.Card == rel && opt.Card == rel &&
+                opt.Conditions[0].Card == rel &&
+                prof.FreePlaySetSpellExclude[0] == rel && prof.AvoidColumnCard == rel;
+
+            // 비-ID 필드: 절대 변환되면 안 됨
+            var nonIdOk =
+                prof.Actions[0].Priority == pre && actCond.Value == pre && actCond.Count == pre &&
+                actCond.ThemeCode == pre && actCond.RaceId == pre &&
+                prof.Choices[0].Priority == pre && prof.Choices[0].WhenMax == pre &&
+                prof.Choices[0].OptionDesc == pre &&
+                prof.Forbids[0].ChainLimit == pre && prof.Forbids[0].EffectDesc == pre &&
+                prof.Triggers[0].Priority == pre && prof.Triggers[0].Group == pre &&
+                step.Order == pre && opt.Rank == pre &&
+                opt.Conditions[0].Value == pre && opt.Conditions[0].Count == pre;
+
+            if (!idsOk) problems.Add("B-24: 카드 ID 필드가 변환되지 않음(화이트리스트 누락)");
+            if (!nonIdOk) problems.Add("B-24: 비-ID 필드(Priority/Value/Count/ThemeCode/RaceId/ChainLimit/EffectDesc/OptionDesc)가 변환됨");
+            if (applied != 15) problems.Add("B-24: Apply 변환 수가 15가 아님(" + applied + ")");
+
+            // 3) 변환 결과가 JSON 왕복·코드생성을 통과하는지 (파일에 쓰기 전 단계)
+            var jsonOk = false;
+            try
+            {
+                var round = JsonSerializer.Deserialize<AiProfile>(
+                    JsonSerializer.Serialize(prof, WindBotProject.JsonOpts), WindBotProject.JsonOpts);
+                jsonOk = round != null && round.Actions[0].Card == rel && round.Actions[0].Priority == pre
+                         && round.Choices[0].WhenCard == rel && round.Choices[0].OptionDesc == pre
+                         && round.Routes[0].Steps[0].Options[0].Card == rel;
+            }
+            catch { }
+            if (!jsonOk) problems.Add("B-24: 변환 결과 JSON 왕복 실패(카드/비-ID 필드)");
+
+            var genOk = false;
+            try
+            {
+                var src = RuleCodeGen.Generate(prof);
+                genOk = src.Length > 0 && src.IndexOf(rel.ToString(), StringComparison.Ordinal) >= 0
+                        && src.IndexOf(pre.ToString(), StringComparison.Ordinal) >= 0;   // Priority 는 그대로 남는다
+            }
+            catch { }
+            if (!genOk) problems.Add("B-24: 변환 결과로 코드생성이 실패하거나 ID 가 반영되지 않음");
+
+            // 4) 미리보기 창(XAML) 생성 — 표시하지 않고 레이아웃만 (템플릿/리소스 오류 조기 발견)
+            var previewOk = false;
+            try
+            {
+                var w = new PreReleasePreviewWindow(plan);
+                if (w.Content is FrameworkElement fe)
+                {
+                    fe.Measure(new Size(940, 600));
+                    fe.Arrange(new Rect(0, 0, 940, 600));
+                    fe.UpdateLayout();
+                }
+                previewOk = w.GridChangeCount >= plan.Changes.Count;
+                w.Close();
+            }
+            catch (Exception ex) { problems.Add("B-24: 미리보기 창 생성 실패: " + ex.Message); }
+
+            // 5) 실제 cdb 쌍 (카탈로그가 준비된 경우에만)
+            var live = "skip";            if (catalog.IsReady)
+            {
+                var liveOk = catalog.Badge(101104012).StartsWith("프리릴리즈 → 정규 " + rel, StringComparison.Ordinal)
+                             && catalog.IsPreRelease(101104012)
+                             && catalog.OfficialId(101104012) == rel
+                             && catalog.OfficialId(100273006) == 5130393
+                             && catalog.Badge(92517928) == "정규"
+                             && !catalog.IsPreRelease(92517928);
+                live = liveOk ? "OK" : "NG";
+                if (!liveOk)
+                    problems.Add("B-24: 실제 cdb 매핑이 다름 (101104012→92586237 / 100273006→5130393 / 92517928=정규)");
+            }
+
+            B24Metrics = "btn=" + (btnOk ? "OK" : "NG") +
+                         " warn=" + (warnOk ? "OK" : "NG") +
+                         " badge=" + (badgeOk ? "OK" : "NG") +
+                         " rule=" + (ruleOk ? "OK" : "NG") +
+                         " deck=" + (deckOk ? "OK" : "NG") +
+                         " ids=" + (idsOk ? "OK" : "NG") +
+                         " nonId=" + (nonIdOk ? "OK" : "NG") +
+                         " json=" + (jsonOk ? "OK" : "NG") +
+                         " gen=" + (genOk ? "OK" : "NG") +
+                         " preview=" + (previewOk ? "OK" : "NG") +
+                         " applied=" + applied +
+                         " live=" + live +
+                         " catalog=" + (catalog.IsReady ? catalog.ConvertibleCount + "쌍" : "(미준비)") +
+                         " badgeText=\"" + badgeText + "\"" +
+                         " text=\"" + warnText + "\"";
             return problems;
         }
 
@@ -2743,6 +3204,7 @@ namespace WindBotAIEditor
                 var engine = StripDeckName(file);
                 TxtEngineName.Text = engine;
                 TryLoadProfile(engine);
+                UpdatePreReleaseWarning();      // B-24
             }
             catch (Exception ex) { Status("덱 읽기 실패: " + ex.Message); }
         }
@@ -3392,6 +3854,11 @@ namespace WindBotAIEditor
         }
     }
 }
+
+
+
+
+
 
 
 

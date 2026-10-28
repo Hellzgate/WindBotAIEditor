@@ -88,6 +88,14 @@ public partial class App : Application
             Shutdown(code);
             return;
         }
+
+        // 프리릴리즈(pre) → 정규 카드 ID 검사: WindBotAIEditor.exe --prerelease <EDOPro폴더|rules.json|*.ydk> [--convert] [--edopro <폴더>] [--limit N]
+        if (e.Args.Length >= 2 && e.Args[0] == "--prerelease")
+        {
+            int code = RunPreRelease(e.Args);
+            Shutdown(code);
+            return;
+        }
         base.OnStartup(e);
     }
 
@@ -157,6 +165,12 @@ public partial class App : Application
             problems.AddRange(w.VerifyB21Ui());
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // B-24: 프리릴리즈 → 정규 카드 ID 변환 (배지 · 리플렉션 화이트리스트 · 덱)
+            total = problems.Count;
+            problems.AddRange(w.VerifyB24Ui());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             Console.WriteLine(problems.Count == 0 ? "UICHECK OK" : "UICHECK FAIL " + problems.Count);
             Console.WriteLine("tabs=" + w.MainTabCount +
                               " ruleSubTabs=" + w.RuleSubTabCount +
@@ -183,6 +197,7 @@ public partial class App : Application
             Console.WriteLine("b18 " + w.B18Metrics);
             Console.WriteLine("b20 " + w.B20Metrics);
             Console.WriteLine("b21 " + w.B21Metrics);
+            Console.WriteLine("b24 " + w.B24Metrics);
             Console.WriteLine("profile=" + (profilePath == null ? "(없음)" : Path.GetFileName(profilePath) + (loaded ? " OK" : " FAIL")) +
                               " summary=\"" + w.RuleSummaryText + "\"");
             return problems.Count == 0 ? 0 : 1;
@@ -404,6 +419,14 @@ public partial class App : Application
         Console.WriteLine("opened=" + CardDatabase.Instance.Paths.Count);
         var rows = CardDatabase.Instance.Search("푸른 눈", 5);
         foreach (var r in rows) Console.WriteLine($"  hit {r.Id} {r.Name} [{r.Source}]");
+            // B-28: 에라타 전 카드 숨김/표시 확인
+            var preHidden = CardDatabase.Instance.Search("Pre-Errata", 500);
+            CardDatabase.ShowPreErrata = true;
+            var preShown = CardDatabase.Instance.Search("Pre-Errata", 500);
+            CardDatabase.ShowPreErrata = false;
+            Console.WriteLine("B-28 pre-errata hidden=" + preHidden.Count + " shown=" + preShown.Count +
+                              " isPreName=" + CardDatabase.IsPreErrataName("Firewall Dragon (Pre-Errata)") +
+                              " normalName=" + CardDatabase.IsPreErrataName("Firewall Dragon"));
         Console.WriteLine("name(89631139)=" + CardDatabase.Instance.NameOf(89631139));
         Console.WriteLine("idOf(푸른 눈의 백룡)=" + CardDatabase.Instance.FindIdByName("푸른 눈의 백룡"));
         // B-12: 같은 이름 카드(대체 일러/재록) 그룹
@@ -412,6 +435,199 @@ public partial class App : Application
                           "  name=" + CardDatabase.Instance.NameOf(59438930) +
                           "  groups=" + CardDatabase.Instance.AliasGroupCount);
         CardDatabase.Instance.Close();
+        return 0;
+    }
+
+    /// <summary>
+    /// 프리릴리즈 → 정규 카드 ID 검사 (화면 없음 · 파일 쓰기 없음 — <c>--convert</c> 도 미리보기만).
+    /// 사용: --prerelease &lt;EDOPro폴더|rules.json|*.ydk&gt; [--convert] [--edopro &lt;폴더&gt;] [--limit N]
+    /// </summary>
+    private static int RunPreRelease(string[] args)
+    {
+        try
+        {
+            string? target = null, edoproOpt = null;
+            var convert = false;
+            var limit = 20;
+            for (var i = 1; i < args.Length; i++)
+            {
+                var a = args[i];
+                if (string.Equals(a, "--convert", StringComparison.OrdinalIgnoreCase)) { convert = true; continue; }
+                if (string.Equals(a, "--edopro", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { edoproOpt = args[++i]; continue; }
+                if (string.Equals(a, "--limit", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { int.TryParse(args[++i], out limit); continue; }
+                target ??= a;
+            }
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                Console.Error.WriteLine("사용: --prerelease <EDOPro폴더|rules.json|*.ydk> [--convert] [--edopro <폴더>] [--limit N]");
+                return 2;
+            }
+
+            var path = Path.GetFullPath(target);
+            var edopro = ResolveEdopro(edoproOpt, path);
+            if (string.IsNullOrWhiteSpace(edopro))
+            {
+                Console.Error.WriteLine("EDOPro 폴더를 찾지 못했습니다 — --edopro <폴더> 로 지정하세요.");
+                return 3;
+            }
+
+            Console.WriteLine("EDOPRO " + edopro);
+            var catalog = PreReleaseCatalog.Instance;
+            if (!catalog.ScanNow(edopro!))
+            {
+                Console.Error.WriteLine("스캔 실패: " + PreReleaseCatalog.RepositoriesOf(edopro!));
+                return 4;
+            }
+            var repos = PreReleaseCatalog.RepositoriesOf(edopro!);
+            Console.WriteLine("REPOS " + repos);
+            Console.WriteLine("FILES pre=" + catalog.PreFileCount + " official=" + catalog.OfficialFileCount +
+                              " translation=" + catalog.TranslationFileCount);
+            Console.WriteLine("CARDS preRows=" + catalog.PreRowCount + " preIds=" + catalog.PreCardCount +
+                              " convertible=" + catalog.ConvertibleCount +
+                              " cache=" + (catalog.FromCache ? "hit" : "miss") + " " + catalog.ScanMs + "ms");
+            Console.WriteLine("CACHEFILE " + PreReleaseCatalog.CachePath);
+
+            // 카드 이름 조회용 cdb (읽기 전용)
+            var windbot = Path.Combine(edopro!, "WindBot");
+            var cdb = EnsureCardDatabase(Directory.Exists(windbot) ? windbot : edopro!);
+            Console.WriteLine("CDB " + cdb);
+
+            // 1) 폴더만 준 대상 → 통계 + 매핑 샘플
+            if (Directory.Exists(path))
+            {
+                var maps = catalog.Mappings();
+                Console.WriteLine("MAPPINGS " + maps.Count + "쌍 (앞 " + Math.Min(limit, maps.Count) + "개)");
+                foreach (var kv in maps.Take(limit))
+                    Console.WriteLine("  " + kv.Key + " → " + string.Join(", ", kv.Value.Select(v => v.ToString()).ToArray()) +
+                                      "   (" + NameOfCard(kv.Key) + ")");
+                Console.WriteLine("SUMMARY pre=" + catalog.PreCardCount + " convertible=" + catalog.ConvertibleCount);
+                return 0;
+            }
+
+            if (!File.Exists(path)) { Console.Error.WriteLine("파일 없음: " + path); return 5; }
+
+            // 2) 덱(.ydk) 검사
+            if (path.EndsWith(".ydk", StringComparison.OrdinalIgnoreCase))
+            {
+                var text = File.ReadAllText(path);
+                var ids = PreReleaseConverter.DeckIds(text);
+                Console.WriteLine("DECK " + Path.GetFileName(path) + " ids=" + ids.Count +
+                                  " counts=" + FormatCounts(text));
+                return CheckIds(ids, catalog, convert, path, text, null);
+            }
+
+            // 3) 규칙 프로필(.json) 검사 (+ 같은 엔진의 덱)
+            if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                var profile = JsonSerializer.Deserialize<AiProfile>(File.ReadAllText(path), WindBotProject.JsonOpts);
+                if (profile == null) { Console.Error.WriteLine("JSON 파싱 실패: " + path); return 6; }
+                RuleMigration.Normalize(profile);
+
+                var deckPath = FindDeckFor(edopro!, profile.Engine);
+                var deckText = deckPath != null && File.Exists(deckPath) ? File.ReadAllText(deckPath) : null;
+                Console.WriteLine("PROFILE " + Path.GetFileName(path) + " engine=" + profile.Engine +
+                                  " actions=" + profile.Actions.Count + " choices=" + profile.Choices.Count +
+                                  " forbids=" + profile.Forbids.Count + " triggers=" + (profile.Triggers.Count + profile.OppTriggers.Count) +
+                                  " routes=" + profile.Routes.Count + "/" + profile.RoutesSecond.Count);
+                Console.WriteLine("DECKFILE " + (deckText == null ? "(없음)" : deckPath!));
+                var ids = PreReleaseConverter.CollectIds(profile);
+                if (deckText != null) ids.AddRange(PreReleaseConverter.DeckIds(deckText));
+                var distinct = ids.Distinct().OrderBy(x => x).ToList();
+                return CheckIds(distinct, catalog, convert, path, deckText, profile);
+            }
+
+            Console.Error.WriteLine("지원하지 않는 대상: " + path + " (EDOPro 폴더 / rules.json / *.ydk)");
+            return 7;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("ERROR " + ex);
+            return 8;
+        }
+    }
+
+    /// <summary>--prerelease 대상 경로에서 EDOPro 폴더를 추정한다 (D:\edopro\WindBot\Executors\_src\x.json 등).</summary>
+    private static string? ResolveEdopro(string? explicitPath, string target)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath) && Directory.Exists(explicitPath)) return Path.GetFullPath(explicitPath);
+        if (Directory.Exists(target) && Directory.Exists(Path.Combine(target, "repositories"))) return target;
+
+        var p = target;
+        for (var i = 0; i < 6 && !string.IsNullOrEmpty(p); i++)
+        {
+            if (Directory.Exists(Path.Combine(p, "repositories"))) return p;
+            p = Path.GetDirectoryName(p) ?? "";
+        }
+        var saved = AppSettings.Load().EdoproPath;
+        if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved)) return saved;
+        return null;
+    }
+
+    private static string? FindDeckFor(string edopro, string engine)
+    {
+        if (string.IsNullOrWhiteSpace(engine)) return null;
+        var decks = Path.Combine(edopro, "WindBot", "Decks");
+        var path = Path.Combine(decks, "AI_" + engine + ".ydk");
+        return File.Exists(path) ? path : null;
+    }
+
+    private static string FormatCounts(string deckText)
+    {
+        var (m, x, s) = WindBotProject.CountDeck(deckText);
+        return m + "/" + x + "/" + s;
+    }
+
+    private static string NameOfCard(int id)
+    {
+        var name = PreReleaseCatalog.Instance.NameOf(id);
+        if (name.Length > 0) return name;
+        return CardDatabase.Instance.NameOf(id);
+    }
+
+    /// <summary>ID 목록의 프리릴리즈 여부를 출력하고 요약한다. --convert 면 변환 미리보기(파일 쓰기 없음).</summary>
+    private static int CheckIds(List<int> ids, PreReleaseCatalog catalog, bool convert,
+                                string target, string? deckText, AiProfile? profile)
+    {
+        Console.WriteLine("CHECK ids=" + ids.Count);
+        var pre = new List<int>();
+        var convertible = new List<int>();
+        foreach (var id in ids)
+        {
+            var state = catalog.StateOf(id);
+            if (state == ReleaseState.PreRelease || state == ReleaseState.PreReleaseConvertible)
+            {
+                pre.Add(id);
+                if (state == ReleaseState.PreReleaseConvertible) convertible.Add(id);
+            }
+            if (state == ReleaseState.Official && ids.Count > 60) continue;   // 목록이 길면 정규는 요약만
+            Console.WriteLine("  " + id + "  " + catalog.Describe(id));
+        }
+
+        Console.WriteLine("PRE " + pre.Count + " (변환 가능 " + convertible.Count + ")");
+        foreach (var id in convertible)
+            Console.WriteLine("  변환가능 " + id + " → " + catalog.OfficialId(id) + "   (" + NameOfCard(id) + ")");
+
+        if (convert)
+        {
+            Console.WriteLine("PREVIEW (파일 쓰기 없음)");
+            if (profile != null)
+            {
+                var plan = PreReleaseConverter.Build(profile, deckText);
+                foreach (var c in plan.Changes) Console.WriteLine("  " + c.Display);
+                Console.WriteLine("SUMMARY " + plan.Summary + " · 총 " + plan.Changes.Count + "건");
+            }
+            else if (deckText != null)
+            {
+                var changes = new List<PreIdChange>();
+                PreReleaseConverter.ConvertDeck(deckText, catalog.OfficialId, changes);
+                foreach (var c in changes) Console.WriteLine("  " + c.Display);
+                Console.WriteLine("SUMMARY 덱 " + changes.Count + "장");
+            }
+            else Console.WriteLine("  (변환 대상 없음)");
+        }
+
+        Console.WriteLine("TARGET " + Path.GetFileName(target) + " ids=" + ids.Count +
+                          " pre=" + pre.Count + " convertible=" + convertible.Count);
         return 0;
     }
 

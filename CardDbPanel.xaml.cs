@@ -11,9 +11,46 @@ namespace WindBotAIEditor
     {
         public event Action<int>? ApplyCardRequested;
 
+        /// <summary>지금 상세를 보여주는 카드 ID (0 = 없음)</summary>
+        private int _shownId;
+
+        /// <summary>B-24: 배지 문구 (--uicheck 확인용)</summary>
+        public string ReleaseBadgeText => LblRelease == null ? "" : LblRelease.Text;
+
         public CardDbPanel()
         {
             InitializeComponent();
+            // 카탈로그 스캔이 끝나면 배지를 다시 계산한다 (백그라운드 스레드 → UI 스레드)
+            PreReleaseCatalog.Instance.Ready += OnReleaseCatalogReady;
+            Unloaded += (_, __) => PreReleaseCatalog.Instance.Ready -= OnReleaseCatalogReady;
+        }
+
+        private void OnReleaseCatalogReady()
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_shownId > 0) UpdateReleaseBadge(_shownId);
+                }));
+            }
+            catch { /* 창이 닫히는 중 */ }
+        }
+
+        /// <summary>B-24: 프리릴리즈 / 정규 배지 갱신</summary>
+        private void UpdateReleaseBadge(int id)
+        {
+            var catalog = PreReleaseCatalog.Instance;
+            var badge = catalog.Badge(id);
+            LblRelease.Text = badge;
+            var detail = catalog.Stats;
+            if (catalog.IsReleased(id))
+            {
+                var cands = catalog.Candidates(id);
+                detail = "같은 이름의 정규 카드: " + string.Join(", ", cands.Select(c => c.ToString()).ToArray())
+                         + Environment.NewLine + detail;
+            }
+            LblRelease.ToolTip = detail;
         }
 
         private void OnSearch(object sender, RoutedEventArgs e) => RunSearch();
@@ -46,6 +83,8 @@ namespace WindBotAIEditor
             var db = CardDatabase.Instance;
             var info = db.Info(id);
             TxtCardId.Text = id.ToString();
+            _shownId = id;
+            UpdateReleaseBadge(id);
 
             if (info == null)
             {
