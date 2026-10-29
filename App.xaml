@@ -135,6 +135,65 @@
                 <Setter Property="Padding" Value="6,4"/>
             </Style>
 
+            <!-- 2026-10-30: 편집 가능(IsEditable) 콤보용 다크 테마 — 기본 템플릿에는 PART_EditableTextBox 가 없어
+                 흰 입력칸이 그대로 나온다(효과번호/효과 열). 여기서는 입력칸을 직접 그린다. -->
+            <Style x:Key="ThemedEditableComboBox" TargetType="ComboBox">
+                <Setter Property="Background" Value="{DynamicResource InputBg}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextFg}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+                <Setter Property="Padding" Value="6,4"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="MinHeight" Value="28"/>
+                <Setter Property="IsEditable" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBox">
+                            <Grid SnapsToDevicePixels="True">
+                                <ToggleButton x:Name="ToggleButton" Focusable="False" ClickMode="Press"
+                                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="{DynamicResource InputBg}"
+                                                    BorderBrush="{DynamicResource BorderBrush2}"
+                                                    BorderThickness="1" CornerRadius="2">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="18"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          Data="M 0 0 L 6 0 L 3 4 Z" Fill="{DynamicResource SubtleFg}"/>
+                                                </Grid>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                                <TextBox x:Name="PART_EditableTextBox"
+                                         Margin="{TemplateBinding Padding}"
+                                         VerticalContentAlignment="Center"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{DynamicResource TextFg}"
+                                         CaretBrush="{DynamicResource TextFg}"
+                                         SelectionBrush="{DynamicResource BorderBrush2}"
+                                         IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                                <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
+                                       AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                    <Border Background="{DynamicResource InputBg}"
+                                            BorderBrush="{DynamicResource BorderBrush2}"
+                                            BorderThickness="1" MinWidth="{TemplateBinding ActualWidth}"
+                                            MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                        <ScrollViewer>
+                                            <StackPanel IsItemsHost="True"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style TargetType="ListBox">
                 <Setter Property="Background" Value="{DynamicResource InputBg}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextFg}"/>

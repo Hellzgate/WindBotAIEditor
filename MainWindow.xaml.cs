@@ -2639,10 +2639,11 @@ namespace WindBotAIEditor
             var chainOk = src.IndexOf("Duel.CurrentChain", StringComparison.Ordinal) >= 0
                           && src.IndexOf("if (lc.Controller == 0) continue;", StringComparison.Ordinal) >= 0
                           && src.IndexOf("if (c.Id != lc.Id || c.Controller != lc.Controller) continue;", StringComparison.Ordinal) >= 0;
-            var gateOk = src.IndexOf("PickChainCard_1(allowedCards, 1).Count > 0", StringComparison.Ordinal) >= 0;
-            var callOk = src.IndexOf("return PickChainCard_1(allowedCards, max);", StringComparison.Ordinal) >= 0;
+            // 2026-10-30: 첫 인자는 allowedCards / ds<n>(무효 제외) / pool<n>(제외 카드) / rs<n>(내성 제외) 중 하나일 수 있다
+            var gateOk = System.Text.RegularExpressions.Regex.IsMatch(src, @"PickChainCard_1\(\w+, 1\)\.Count > 0");
+            var callOk = System.Text.RegularExpressions.Regex.IsMatch(src, @"return PickChainCard_1\(\w+, max\);");
             var noStaticOk = src.IndexOf("private static IList<ClientCard> PickChainCard_", StringComparison.Ordinal) < 0;
-            var fallbackOk = src.IndexOf("return Pick(allowedCards, max, 0, 0);", StringComparison.Ordinal) >= 0;
+            var fallbackOk = System.Text.RegularExpressions.Regex.IsMatch(src, @"return Pick\(\w+, max, 0, 0\);");
             var dupOk = OverrideCount(src, "public override IList<ClientCard> OnSelectCard(") == 1;
             var whenCardOk = src.IndexOf("Card.IsCode(97268402)", StringComparison.Ordinal) >= 0;
 

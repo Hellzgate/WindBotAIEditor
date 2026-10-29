@@ -459,7 +459,7 @@
                                         <DataGridTemplateColumn Header="효과번호" Width="170">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox IsEditable="True" Height="24"
+                                                    <ComboBox Style="{DynamicResource ThemedEditableComboBox}" Height="24"
                                                               ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
                                                               DisplayMemberPath="Label"
                                                               Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
@@ -669,6 +669,33 @@
                                                     <CheckBox IsChecked="{Binding SkipResistant, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
                                                               ToolTip="후보에서 내성 몹(대상/효과 보호)을 제외합니다 — WindBot 내장 목록(InvincibleEnemyMonster / ShouldNotBeTarget / ShouldNotBeMonsterTarget / ShouldNotBeSpellTrapTarget). 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="무효 제외" Width="76">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding SkipDisabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                              ToolTip="후보에서 이미 효과가 무효된 카드(ClientCard.IsDisabled())를 제외합니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-10-30 신규)"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="뒷면 제외" Width="76">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding SkipFaceDown, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                              ToolTip="후보에서 뒷면 카드(ClientCard.IsFacedown())를 제외합니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-10-30 신규)"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="앞면만" Width="68">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding OnlyFaceUp, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                              ToolTip="앞면 카드(ClientCard.IsFaceup())만 남깁니다. '뒷면 제외'를 같이 켜면 뒷면 제외가 먼저 적용됩니다 (2026-10-30 신규)"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -920,7 +947,7 @@
                                         <DataGridTemplateColumn Header="효과" Width="170">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox IsEditable="True" Height="24"
+                                                    <ComboBox Style="{DynamicResource ThemedEditableComboBox}" Height="24"
                                                               ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
                                                               DisplayMemberPath="Label"
                                                               Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
@@ -1602,6 +1629,7 @@
         </TabControl>
     </DockPanel>
 </Window>
+
 
 
 

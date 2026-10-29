@@ -375,6 +375,24 @@ namespace WindBotAIEditor.Models
         public bool SkipResistant { get; set; }
 
         /// <summary>
+        /// 2026-10-30: 후보에서 **효과가 무효된** 카드를 제외한다(`ClientCard.IsDisabled()`).
+        /// 실행기 73개에서 `IsDisabled` 349회 사용 → 실전 빈도 높음. 제외 후 후보가 `min` 미만이면 다음 규칙으로 넘어간다.
+        /// </summary>
+        public bool SkipDisabled { get; set; }
+
+        /// <summary>
+        /// 2026-10-30: 후보에서 **뒷면** 카드를 제외한다(`!c.IsFacedown()`).
+        /// 세트 마함·뒷면 몬스터를 대상으로 잡지 않게 한다. 제외 후 후보가 `min` 미만이면 다음 규칙으로 넘어간다.
+        /// </summary>
+        public bool SkipFaceDown { get; set; }
+
+        /// <summary>
+        /// 2026-10-30: **앞면 카드만** 남긴다(`c.IsFaceup()`). 앞면 몬스터/마함을 대상으로 하는 효과에 쓴다.
+        /// `SkipFaceDown` 과 동시에 켜면 뒷면 제외가 먼저 적용된다.
+        /// </summary>
+        public bool OnlyFaceUp { get; set; }
+
+        /// <summary>
         /// B-25: 선택 힌트(<c>hint</c>)가 이 값일 때만 적용 (0 = 무관).
         /// 같은 카드가 같은 콜백을 여러 번 띄울 때 구분한다
         /// (예: 526 = 공개 확인 `HINTMSG_CONFIRM`, 504 = 묘지로 `HINTMSG_TOGRAVE`, 502 = 파괴).
@@ -1253,6 +1271,30 @@ namespace WindBotAIEditor.Models
             // N-6: 펜듈럼 (P존 = 마함존 0·4, 스케일은 ClientCard.LScale/RScale)
             new ConditionKind { Id = "fieldHasPendulum",  Label = "필드(P존)에 펜듈럼 카드 있음", NeedsValue = false, NeedsSide = true },
             new ConditionKind { Id = "pendulumScale",     Label = "펜듈럼 스케일이 N을 포함(레벨 N 소환 가능)", NeedsValue = true, NeedsSide = true },
+            // 2026-10-30: 실행기 73개 판정 빈도 기반 신규 조건 (29-condition-candidates.md)
+            new ConditionKind { Id = "isMyTurn",       Label = "지금이 내 턴", NeedsValue = false },
+            new ConditionKind { Id = "phaseMain",      Label = "지금이 메인 페이즈", NeedsValue = false },
+            new ConditionKind { Id = "phaseBattle",    Label = "지금이 배틀 페이즈", NeedsValue = false },
+            new ConditionKind { Id = "phaseEnd",       Label = "지금이 엔드 페이즈", NeedsValue = false },
+            new ConditionKind { Id = "chainLinkCount", Label = "체인 링크 수", NeedsValue = true },
+            new ConditionKind { Id = "chainHasCard",   Label = "현재 체인에 특정 카드 있음", NeedsValue = false, NeedsCard = true },
+            new ConditionKind { Id = "cardIsDisabled", Label = "이 카드는 효과 무효 상태", NeedsValue = false },
+            // 2026-10-30: 대상 기준 무효 판정 — cardIsDisabled 는 '발동하는 카드' 기준이라 대상 판정에 못 쓴다
+            new ConditionKind { Id = "chainLastDisabled", Label = "체인 마지막 카드가 무효", NeedsValue = false },
+            new ConditionKind { Id = "chainHasDisabled",  Label = "체인에 무효 카드 있음", NeedsValue = false },
+            // 2026-10-30: 필드/자원 수치 + 이 카드의 표시 상태 (문서 29 P1 잔여분)
+            new ConditionKind { Id = "myFaceUpCount",   Label = "내 필드 앞면 카드 수", NeedsValue = true },
+            new ConditionKind { Id = "myFaceDownCount", Label = "내 필드 뒷면 카드 수", NeedsValue = true },
+            new ConditionKind { Id = "mySetCount",      Label = "내 세트(뒷면 마함) 수", NeedsValue = true },
+            new ConditionKind { Id = "graveCount",      Label = "내 묘지 수", NeedsValue = true },
+            new ConditionKind { Id = "enemyGraveCount", Label = "상대 묘지 수", NeedsValue = true },
+            new ConditionKind { Id = "banishedCount",   Label = "내 제외 카드 수", NeedsValue = true },
+            new ConditionKind { Id = "deckCount",       Label = "내 덱 남은 장수", NeedsValue = true },
+            new ConditionKind { Id = "extraCount",      Label = "내 엑스트라 덱 장수", NeedsValue = true },
+            new ConditionKind { Id = "bestAttackDiff",  Label = "공격력 차이(내 최고 − 상대 최고)", NeedsValue = true },
+            new ConditionKind { Id = "cardIsFaceup",    Label = "이 카드는 앞면", NeedsValue = false },
+            new ConditionKind { Id = "cardIsFacedown",  Label = "이 카드는 뒷면", NeedsValue = false },
+            new ConditionKind { Id = "cardIsDefense",   Label = "이 카드는 수비 표시", NeedsValue = false },
         };
 
         public static ConditionKind Find(string id) =>

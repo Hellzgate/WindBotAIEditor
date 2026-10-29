@@ -161,7 +161,11 @@ namespace WindBotAIEditor.Services
 
             bool needActivatingCard = forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0
                                       || forbidNoTargetEnemy.Count > 0
-                                      || choices.Any(c => c.WhenCard > 0);
+                                      || choices.Any(c => c.WhenCard > 0)
+                                      // 2026-10-30: chainHasCard 조건은 InChain 헬퍼를 필요로 한다
+                                      || actions.Any(a => (a.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"))
+                                      || forbids.Any(f => (f.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"))
+                                      || choices.Any(ch => (ch.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"));
 
             sb.AppendLine("// WindBot AI Editor — rule-generated executor (schema v11)");
             sb.AppendLine("// engine : " + cls);
@@ -302,6 +306,14 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        //   없음: File.AppendAllText / File.WriteAllText / File.ReadAllText / Path.GetTempPath / FileSystemInfo.Delete");
                 sb.AppendLine("        //   있음: File.AppendText · StreamWriter.WriteLine · FileInfo.Length · File.Delete · Path.Combine · Directory.*");
                 sb.AppendLine("        private static readonly object _logLock = new object();");
+                sb.AppendLine("        // 2026-10-30: 판정 시점 상태 — 조건(턴/페이즈/체인) 검증용");
+                sb.AppendLine("        private string StateStr()");
+                sb.AppendLine("        {");
+                sb.AppendLine("            int ph = (int)Duel.Phase;");
+                sb.AppendLine("            int cn = (Duel.CurrentChain == null) ? 0 : Duel.CurrentChain.Count;");
+                sb.AppendLine("            return \" turn=\" + Duel.Turn.ToString() + \" phase=\" + ph.ToString() + \" my=\" + Duel.Player.ToString() + \" chainN=\" + cn.ToString();");
+                sb.AppendLine("        }");
+                sb.AppendLine();
                 sb.AppendLine("        private static void LogLine(string msg)");
                 sb.AppendLine("        {");
                 sb.AppendLine("            try { Console.WriteLine(msg); } catch { }");
@@ -319,14 +331,39 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("            lock (_logLock)");
                 sb.AppendLine("            {");
                 sb.AppendLine("                System.IO.FileInfo fi = new System.IO.FileInfo(path);");
-                sb.AppendLine("                if (fi.Exists && fi.Length > 2097152) System.IO.File.Delete(path);");
+                sb.AppendLine("                if (fi.Exists && fi.Length > 8388608)   // 2026-10-30: 2MB → 8MB");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    if (Environment.OSVersion.Platform == PlatformID.Win32NT) RotateLog(path);   // .old 로 백업(Windows)");
+                sb.AppendLine("                    else System.IO.File.Delete(path);                                            // Android: 기존 동작 유지");
+                sb.AppendLine("                }");
                 sb.AppendLine("                using (System.IO.StreamWriter w = System.IO.File.AppendText(path))");
                 sb.AppendLine("                    w.WriteLine(DateTime.Now.ToString(\"HH:mm:ss\") + \" \" + msg);");
                 sb.AppendLine("            }");
                 sb.AppendLine("        }");
                 sb.AppendLine();
+                sb.AppendLine("        // 2026-10-30: 회전 시 직전 로그를 .old 로 남긴다 (Windows 전용, NoInlining 분리)");
+                sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
+                sb.AppendLine("        private static void RotateLog(string path)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            try { System.IO.File.Copy(path, path + \".old\", true); } catch { }");
+                sb.AppendLine("            try { System.IO.File.Delete(path); } catch { }");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // 2026-10-30: 양쪽 필드(몬스터존)의 무효 카드 수 — IsDisabled() 가 실엔진 status(0x1) 를 읽는지 진단");
+                sb.AppendLine("        private int FieldDisabledCount()");
+                sb.AppendLine("        {");
+                sb.AppendLine("            int n = 0;");
+                sb.AppendLine("            if (Bot != null && Bot.MonsterZone != null)");
+                sb.AppendLine("                for (int i = 0; i < Bot.MonsterZone.Length; i++)");
+                sb.AppendLine("                    if (Bot.MonsterZone[i] != null && Bot.MonsterZone[i].IsDisabled()) n++;");
+                sb.AppendLine("            if (Enemy != null && Enemy.MonsterZone != null)");
+                sb.AppendLine("                for (int i = 0; i < Enemy.MonsterZone.Length; i++)");
+                sb.AppendLine("                    if (Enemy.MonsterZone[i] != null && Enemy.MonsterZone[i].IsDisabled()) n++;");
+                sb.AppendLine("            return n;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
                 sb.AppendLine("        // B-27: SelectCard 결과 로그 (누가/몇 장/힌트/무엇을 골랐는지)");
-                sb.AppendLine("        private void LogSelectCard(int min, int max, long hint, IList<ClientCard> picked)");
+                sb.AppendLine("        private void LogSelectCard(IList<ClientCard> cards, int min, int max, long hint, IList<ClientCard> picked)");
                 sb.AppendLine("        {");
                 sb.AppendLine("            string ids = \"\";");
                 sb.AppendLine("            if (picked != null)");
@@ -337,6 +374,11 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                    ids += (picked[i] == null ? \"null\" : picked[i].Id.ToString());");
                 sb.AppendLine("                }");
                 sb.AppendLine("            }");
+                sb.AppendLine("            int disN = 0;   // 2026-10-30: 후보 중 효과 무효 카드 수");
+                sb.AppendLine("            if (cards != null)");
+                sb.AppendLine("                for (int i = 0; i < cards.Count; i++)");
+                sb.AppendLine("                    if (cards[i] != null && cards[i].IsDisabled()) disN++;");
+                sb.AppendLine("            int fdis = FieldDisabledCount();   // 양쪽 필드(몬스터존)의 무효 카드 수 — API 진단용");
             sb.AppendLine("            string chainStr = \"\";   // B-34: 현재 체인 링크 카드들 (앞=link1)");
             sb.AppendLine("            if (Duel.CurrentChain != null)");
             sb.AppendLine("            {");
@@ -349,9 +391,9 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                }");
             sb.AppendLine("            }");
             sb.AppendLine("            LogLine(\"[AI-EDITOR] select card=\" + (Card != null ? Card.Id.ToString() : \"-\")");
-            sb.AppendLine("                + \" min=\" + min.ToString() + \" max=\" + max.ToString() + \" hint=\" + hint.ToString()");
+            sb.AppendLine("                + \" min=\" + min.ToString() + \" max=\" + max.ToString() + \" hint=\" + hint.ToString() + \" n=\" + (cards != null ? cards.Count : 0) + \" dis=\" + disN.ToString() + \" fdis=\" + fdis.ToString()");
             sb.AppendLine("                + \" chain=[\" + chainStr + \"]\"   // B-34: 체인 목록");
-            sb.AppendLine("                + \" -> \" + ids);");
+            sb.AppendLine("                + \" -> \" + ids + StateStr());   // 2026-10-30: 상태(턴/페이즈/체인)");
                 sb.AppendLine("        }");
             }
 
@@ -824,7 +866,7 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("        public override " + sig.ReturnType + " " + sig.Name + "(" + sig.Params + ")");
                     sb.AppendLine("        {");
                     sb.AppendLine("            IList<ClientCard> __picked = SelectCardCore(" + sig.BaseArgs + ");");
-                    sb.AppendLine("            LogSelectCard(min, max, hint, __picked);");
+                    sb.AppendLine("            LogSelectCard(cards, min, max, hint, __picked);");
                     sb.AppendLine("            return __picked;");
                     sb.AppendLine("        }");
                     sb.AppendLine();
@@ -931,9 +973,34 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterResistant(" + (xi > 0 ? "pool" + xi : srcList) + ");   // B-29: 내성 몹 제외");
                     }
 
+                    // 2026-10-30: 효과 무효 카드 제외 — 후보가 min 미만이면 이 규칙을 건너뛴다
+                    bool disabledFilter = isSelectCard && c.SkipDisabled;
+                    if (disabledFilter)
+                    {
+                        string dsSrc = resistFilter ? ruleSrc : (xi > 0 ? "pool" + xi : srcList);
+                        ruleSrc = "ds" + (emitted + 1);
+                        sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterNotDisabled(" + dsSrc + ");   // 무효 카드 제외");
+                    }
+
+                    // 2026-10-30: 뒷면 제외 / 앞면만 — 후보가 min 미만이면 이 규칙을 건너뛴다
+                    bool faceDownFilter = isSelectCard && c.SkipFaceDown;
+                    if (faceDownFilter)
+                    {
+                        string fdSrc = (disabledFilter || resistFilter) ? ruleSrc : (xi > 0 ? "pool" + xi : srcList);
+                        ruleSrc = "fd" + (emitted + 1);
+                        sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterNotFaceDown(" + fdSrc + ");   // 뒷면 카드 제외");
+                    }
+                    bool faceUpFilter = isSelectCard && c.OnlyFaceUp;
+                    if (faceUpFilter)
+                    {
+                        string fuSrc = (faceDownFilter || disabledFilter || resistFilter) ? ruleSrc : (xi > 0 ? "pool" + xi : srcList);
+                        ruleSrc = "fu" + (emitted + 1);
+                        sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterFaceUp(" + fuSrc + ");   // 앞면만");
+                    }
+
                     var parts = new List<string>();
                     if (xi > 0) parts.Add("pool" + xi + ".Count >= min");                          // 후보 부족 → 다음 규칙
-                    if (resistFilter) parts.Add(ruleSrc + ".Count >= min");                        // 내성 제외 후 부족 → 다음 규칙
+                    if (resistFilter || disabledFilter || faceDownFilter || faceUpFilter) parts.Add(ruleSrc + ".Count >= min");   // 필터 후 부족 → 다음 규칙
                     if (c.WhenCard > 0)
                         parts.Add(WhenCardExpr(c.WhenCard));   // B-33: Card/ActivatingCard/체인 링크 모두 확인
                     var mc = maxCond(c);
@@ -1066,7 +1133,7 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("                    if (oi > 0) optStr += \",\";");
                     sb.AppendLine("                    optStr += options[oi].ToString();");
                     sb.AppendLine("                }");
-                    sb.AppendLine("            LogLine(\"[AI-EDITOR] option card=\" + (Card != null ? Card.Id.ToString() : \"-\") + \" n=\" + (options != null ? options.Count : 0) + \" opts=[\" + optStr + \"] -> \" + idx.ToString());   // B-27: 콘솔 + 파일");
+                    sb.AppendLine("            LogLine(\"[AI-EDITOR] option card=\" + (Card != null ? Card.Id.ToString() : \"-\") + \" n=\" + (options != null ? options.Count : 0) + \" opts=[\" + optStr + \"] -> \" + idx.ToString() + StateStr());   // B-27 + 상태");
                     sb.AppendLine("            return idx;");
                 }
                 else if (!done) sb.AppendLine("            return base.OnSelectOption(options);   // 조건 불충족 → 기본 동작");
@@ -1206,11 +1273,12 @@ namespace WindBotAIEditor.Services
                         allConds.AddRange(o.Conditions ?? new List<Condition>());
             }
 
-            bool needBest = allConds.Any(c => c.Kind == "enemyBestAttack" || c.Kind == "myBestAttack");
+            bool needBest = allConds.Any(c => c.Kind == "enemyBestAttack" || c.Kind == "myBestAttack" || c.Kind == "bestAttackDiff");
             bool needOnField = allConds.Any(c => c.Kind == "hasOnField") || triggers.Count > 0;
             bool needAttacking = allConds.Any(c => c.Kind == "enemyAttackingCount");
-            bool needFaceUp = allConds.Any(c => c.Kind == "enemyFaceUpCount");
-            bool needFaceDown = allConds.Any(c => c.Kind == "enemyFaceDownCount");
+            bool needFaceUp = allConds.Any(c => c.Kind == "enemyFaceUpCount" || c.Kind == "myFaceUpCount");
+            bool needFaceDown = allConds.Any(c => c.Kind == "enemyFaceDownCount" || c.Kind == "myFaceDownCount");
+            bool needSetSpell = allConds.Any(c => c.Kind == "mySetCount");   // 2026-10-30
             bool needLevel = allConds.Any(c => c.Kind == "fieldHasLevel");
             bool needLevelCount = allConds.Any(c => c.Kind == "fieldLevelCount");   // B-20
             bool needEmz = allConds.Any(c => c.Kind == "fieldCardInEmz");           // B-20
@@ -1235,6 +1303,14 @@ namespace WindBotAIEditor.Services
 
             // B-29: 내성 몹 제외 필터가 필요한가 (SelectCard 규칙 중 skipResistant)
             bool needResistFilter = choices.Any(c => c.On == "SelectCard" && c.SkipResistant);
+            // 2026-10-30: 효과 무효 카드 제외 필터가 필요한가 (SelectCard 규칙 중 skipDisabled)
+            bool needDisabledFilter = choices.Any(c => c.On == "SelectCard" && c.SkipDisabled);
+            // 2026-10-30: 뒷면 제외 / 앞면만 (skipFaceDown · onlyFaceUp)
+            bool needFaceDownFilter = choices.Any(c => c.On == "SelectCard" && c.SkipFaceDown);
+            bool needFaceUpFilter = choices.Any(c => c.On == "SelectCard" && c.OnlyFaceUp);
+            // 2026-10-30: 대상 기준 무효 판정 (chainLastDisabled / chainHasDisabled) — 쓰는 것만 배출
+            bool needChainLastDisabled = allConds.Any(c => c.Kind == "chainLastDisabled");
+            bool needChainHasDisabled = allConds.Any(c => c.Kind == "chainHasDisabled");
 
             sb.AppendLine();
             if (needBest) sb.Append(StaticHelper("BestAttack", "int", "ClientField f",
@@ -1280,6 +1356,17 @@ namespace WindBotAIEditor.Services
                 "            {",
                 "                ClientCard c = f.SpellZone[i];",
                 "                if (c != null && ((int)c.Position & 0xA) != 0) n++;",
+                "            }",
+                "            return n;"));
+
+            // 2026-10-30: 세트(뒷면) 마법/함정 수 — CountFaceDown 은 몬스터존까지 세므로 따로 둔다
+            if (needSetSpell) sb.Append(StaticHelper("CountSetSpell", "int", "ClientField f",
+                "            int n = 0;",
+                "            if (f == null || f.SpellZone == null) return 0;",
+                "            for (int i = 0; i < f.SpellZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.SpellZone[i];",
+                "                if (c != null && ((int)c.Position & 0xA) != 0) n++;   // 뒷면(세트)",
                 "            }",
                 "            return n;"));
 
@@ -1402,6 +1489,9 @@ namespace WindBotAIEditor.Services
                 "            return false;"));
             if (needSetcode) EmitHasSetcodeHelper(sb);
             if (needResistFilter) EmitResistFilterHelper(sb);
+            if (needDisabledFilter) EmitDisabledFilterHelper(sb, p.DebugEffectLog);
+            if (needFaceDownFilter || needFaceUpFilter) EmitFaceFilterHelpers(sb, needFaceDownFilter, needFaceUpFilter, p.DebugEffectLog);   // 2026-10-30
+            if (needChainLastDisabled || needChainHasDisabled) EmitChainDisabledHelpers(sb, needChainLastDisabled, needChainHasDisabled);   // 2026-10-30
             if (needPick) EmitAttackTargetHelper(sb);   // B-35: 공격 대상 기본 정책
             if (needTheme) EmitThemeHelpers(sb, needThemeMonster);
             if (needThemeExcept) EmitThemeExceptHelpers(sb);   // B-32
@@ -1464,7 +1554,7 @@ namespace WindBotAIEditor.Services
             {
                 sb.AppendLine("        private void LogForbid(string kind, ClientCard target)");
                 sb.AppendLine("        {");
-                sb.AppendLine("            LogLine(\"[AI-EDITOR] forbid \" + kind + \" card=\" + (target != null ? target.Id.ToString() : \"-\") + \" ctrl=\" + (target != null ? target.Controller.ToString() : \"-\") + \" loc=\" + (target != null ? ((int)target.Location).ToString() : \"-\"));");
+                sb.AppendLine("            LogLine(\"[AI-EDITOR] forbid \" + kind + \" card=\" + (target != null ? target.Id.ToString() : \"-\") + \" ctrl=\" + (target != null ? target.Controller.ToString() : \"-\") + \" loc=\" + (target != null ? ((int)target.Location).ToString() : \"-\") + \" fdis=\" + FieldDisabledCount().ToString() + StateStr());");
                 sb.AppendLine("        }");
                 sb.AppendLine();
             }
@@ -1473,7 +1563,7 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        // 효과번호 확인용 로그 (WindBot 콘솔에 표시)");
                 sb.AppendLine("        private bool CheckActivate()");
                 sb.AppendLine("        {");
-                sb.AppendLine("            LogLine(\"[AI-EDITOR] activate \" + (Card != null ? Card.Id.ToString() : \"?\") + \" (\" + (Card != null ? Card.Name : \"\") + \") desc=\" + ActivateDescription);");
+                sb.AppendLine("            LogLine(\"[AI-EDITOR] activate \" + (Card != null ? Card.Id.ToString() : \"?\") + \" (\" + (Card != null ? Card.Name : \"\") + \") desc=\" + ActivateDescription + \" fdis=\" + FieldDisabledCount().ToString() + StateStr());");
                 sb.AppendLine("            return true;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
@@ -2026,6 +2116,111 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("        }");
             sb.AppendLine();
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 2026-10-30: 효과가 무효된 카드 제외 필터(`ClientCard.IsDisabled()`).
+        /// 실행기 73개에서 349회 사용된 판정으로, 이미 무효된 몬스터에 자원을 쓰지 않게 한다.
+        /// </summary>
+        private static void EmitDisabledFilterHelper(StringBuilder sb, bool debugLog)
+        {
+            sb.AppendLine("        // 2026-10-30: 효과 무효 카드 제외 — IsDisabled()");
+            sb.AppendLine("        private static IList<ClientCard> FilterNotDisabled(IList<ClientCard> cards)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            IList<ClientCard> result = new List<ClientCard>();");
+            sb.AppendLine("            if (cards == null) return result;");
+            sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = cards[i];");
+            sb.AppendLine("                if (c == null) continue;");
+            sb.AppendLine("                if (c.IsDisabled()) continue;");
+            sb.AppendLine("                result.Add(c);");
+            sb.AppendLine("            }");
+            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipDisabled before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+            sb.AppendLine("            return result;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// 2026-10-30: **대상 기준** 무효 판정.
+        /// `cardIsDisabled` 는 '발동하려는 카드'(Card) 기준이라 "이미 무효된 상대 몬스터에 뵐러를 또 쓰는" 낭비를 막지 못한다.
+        /// 여기서는 <c>Duel.CurrentChain</c> 의 마지막 링크(= 내가 지금 응답하려는 카드)를 본다.
+        /// </summary>
+        private static void EmitChainDisabledHelpers(StringBuilder sb, bool withLast, bool withHas)
+        {
+            if (withLast)
+            {
+            sb.AppendLine("        // 2026-10-30: 체인 마지막 링크가 이미 효과 무효인지 (내 카드는 아직 체인에 없다)");
+            sb.AppendLine("        private bool ChainLastDisabled()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (Duel.CurrentChain == null || Duel.CurrentChain.Count == 0) return false;");
+            sb.AppendLine("            ClientCard c = Duel.CurrentChain[Duel.CurrentChain.Count - 1];");
+            sb.AppendLine("            return c != null && c.IsDisabled();");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            }
+            if (withHas)
+            {
+            sb.AppendLine("        // 2026-10-30: 체인 링크 중 하나라도 효과 무효인 카드가 있는지");
+            sb.AppendLine("        private bool ChainHasDisabled()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (Duel.CurrentChain == null) return false;");
+            sb.AppendLine("            for (int i = 0; i < Duel.CurrentChain.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = Duel.CurrentChain[i];");
+            sb.AppendLine("                if (c != null && c.IsDisabled()) return true;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            }
+        }
+
+        /// <summary>
+        /// 2026-10-30: 표시 상태 필터 — 뒷면 제외(`skipFaceDown`) / 앞면만(`onlyFaceUp`).
+        /// `FilterNotDisabled` 와 같은 규칙: 제거 후 후보가 `min` 미만이면 그 규칙을 건너뛴다(억지 선택 금지).
+        /// </summary>
+        private static void EmitFaceFilterHelpers(StringBuilder sb, bool withNotFaceDown, bool withFaceUpOnly, bool debugLog)
+        {
+            if (withNotFaceDown)
+            {
+                sb.AppendLine("        // 2026-10-30: 뒷면 카드 제외 — IsFacedown()");
+                sb.AppendLine("        private static IList<ClientCard> FilterNotFaceDown(IList<ClientCard> cards)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            IList<ClientCard> result = new List<ClientCard>();");
+                sb.AppendLine("            if (cards == null) return result;");
+                sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ClientCard c = cards[i];");
+                sb.AppendLine("                if (c == null) continue;");
+                sb.AppendLine("                if (c.IsFacedown()) continue;");
+                sb.AppendLine("                result.Add(c);");
+                sb.AppendLine("            }");
+                if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipFaceDown before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+                sb.AppendLine("            return result;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
+            if (withFaceUpOnly)
+            {
+                sb.AppendLine("        // 2026-10-30: 앞면 카드만 — IsFaceup()");
+                sb.AppendLine("        private static IList<ClientCard> FilterFaceUp(IList<ClientCard> cards)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            IList<ClientCard> result = new List<ClientCard>();");
+                sb.AppendLine("            if (cards == null) return result;");
+                sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ClientCard c = cards[i];");
+                sb.AppendLine("                if (c == null) continue;");
+                sb.AppendLine("                if (!c.IsFaceup()) continue;");
+                sb.AppendLine("                result.Add(c);");
+                sb.AppendLine("            }");
+                if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] onlyFaceUp before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+                sb.AppendLine("            return result;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
         }
 
         /// <summary>
@@ -2994,6 +3189,30 @@ namespace WindBotAIEditor.Services
                 case "pendulumScale": return $"PendulumCovers({SideExpr(c)}, {c.Value})";
                 // B-21: 테마 + 종족 + 엑시즈를 "같은 카드"가 모두 만족 (0 = 해당 검사 생략)
                 case "fieldHasThemeRaceXyz": return $"FieldHasThemeRaceXyz({SideExpr(c)}, {c.ThemeCode}, {c.RaceId})";
+                // 2026-10-30: 빈도 기반 신규 조건 (isMyTurn/phase/chain/무효) — 29-condition-candidates.md
+                case "isMyTurn": return "Duel.Player == 0";
+                case "phaseMain": return "((Duel.Phase & DuelPhase.Main1) != 0 || (Duel.Phase & DuelPhase.Main2) != 0)";
+                case "phaseBattle": return "(Duel.Phase & (DuelPhase.BattleStart | DuelPhase.BattleStep | DuelPhase.Damage | DuelPhase.DamageCal | DuelPhase.Battle)) != 0";
+                case "phaseEnd": return "(Duel.Phase & DuelPhase.End) != 0";
+                case "chainLinkCount": return $"(Duel.CurrentChain != null && Duel.CurrentChain.Count {CountOp(c)} {c.Value})";
+                case "chainHasCard": return CallOr(x => "InChain(" + x + ")", c.Card);
+                case "cardIsDisabled": return "(Card != null && Card.IsDisabled())";
+                // 2026-10-30: 대상 기준 무효 판정 — 체인 마지막(= 응답 대상) / 체인 전체
+                case "chainLastDisabled": return "ChainLastDisabled()";
+                case "chainHasDisabled": return "ChainHasDisabled()";
+                // 2026-10-30: 필드/자원 수치 + 이 카드의 표시 상태
+                case "myFaceUpCount": return $"CountFaceUp(Bot) {c.Op} {c.Value}";
+                case "myFaceDownCount": return $"CountFaceDown(Bot) {c.Op} {c.Value}";
+                case "mySetCount": return $"CountSetSpell(Bot) {c.Op} {c.Value}";
+                case "graveCount": return $"Bot.Graveyard.Count {c.Op} {c.Value}";
+                case "enemyGraveCount": return $"Enemy.Graveyard.Count {c.Op} {c.Value}";
+                case "banishedCount": return $"Bot.Banished.Count {c.Op} {c.Value}";
+                case "deckCount": return $"Bot.Deck.Count {c.Op} {c.Value}";
+                case "extraCount": return $"Bot.ExtraDeck.Count {c.Op} {c.Value}";
+                case "bestAttackDiff": return $"(BestAttack(Bot) - BestAttack(Enemy)) {c.Op} {c.Value}";
+                case "cardIsFaceup": return "(Card != null && Card.IsFaceup())";
+                case "cardIsFacedown": return "(Card != null && Card.IsFacedown())";
+                case "cardIsDefense": return "(Card != null && Card.IsDefense())";
                 case "amFirst": return "Duel.IsFirst";
                 case "amSecond": return "!Duel.IsFirst";
                 case "fieldHasTheme": return ThemeCond(c, c.MonsterOnly
@@ -3022,6 +3241,10 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
+
+
+
 
 
 
