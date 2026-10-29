@@ -166,6 +166,26 @@ namespace WindBotAIEditor.Services
                 result.SourcePath = srcPath;
                 if (!result.Ok && string.IsNullOrWhiteSpace(result.Log))
                     result.Log = "csc 종료 코드 " + p.ExitCode;
+
+                // (2026-10-29) 빌드 스탬프 — 내보내기에서 'DLL 이 규칙보다 오래됐는지'를 **내용(해시)** 으로 판정한다
+                //   (파일 수정시각만 보면 규칙을 저장만 해도 오탐이 난다)
+                if (result.Ok)
+                {
+                    try
+                    {
+                        var rulesPath = Path.Combine(workDir, cls + ".rules.json");
+                        var rulesSha = File.Exists(rulesPath) ? Sha256File(rulesPath) : "";
+                        var srcSha = Sha256Text(sourceText);
+                        var stampPath = Path.Combine(workDir, cls + ".build.json");
+                        var json = "{" + Environment.NewLine +
+                                   "  \"builtAt\": \"" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\"," + Environment.NewLine +
+                                   "  \"rulesSha256\": \"" + rulesSha + "\"," + Environment.NewLine +
+                                   "  \"srcSha256\": \"" + srcSha + "\"" + Environment.NewLine +
+                                   "}" + Environment.NewLine;
+                        File.WriteAllText(stampPath, json, new UTF8Encoding(false));
+                    }
+                    catch { /* 스탬프 실패는 빌드 결과에 영향을 주지 않는다 */ }
+                }
             }
             catch (Exception ex)
             {
@@ -174,6 +194,21 @@ namespace WindBotAIEditor.Services
             }
 
             return result;
+        }
+
+        /// <summary>파일 SHA-256 (빌드 스탬프/오래됨 판정용).</summary>
+        internal static string Sha256File(string path)
+        {
+            using var fs = File.OpenRead(path);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(fs));
+        }
+
+        /// <summary>문자열 SHA-256 (소스 동일성 판정용).</summary>
+        internal static string Sha256Text(string text)
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? "")));
         }
     }
 }

@@ -6,6 +6,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WindBotAIEditor"
         xmlns:controls="clr-namespace:WindBotAIEditor.Controls"
+        xmlns:svc="clr-namespace:WindBotAIEditor.Services"
         Title="WindBot AI 에디터" Height="1000" Width="1560" MinWidth="1100" MinHeight="700" Icon="Assets/app.ico"
         WindowStartupLocation="CenterScreen"
         FontFamily="Malgun Gothic" FontSize="13"
@@ -258,6 +259,32 @@
                                                   ToolTip="릴리스/제물 후보에서 융합·싱크로·엑시즈·링크 몬스터를 뺍니다 (소재 사용은 그대로 허용). 남은 후보가 min 미만이면 원래 목록을 씁니다 — 엔진 오류 방지">
                                             <TextBlock Text="자유 플레이 시 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음" TextWrapping="Wrap"/>
                                         </CheckBox>
+                                        <!-- B-46: B-18 제물 여력 가드 예외 카드 (무제물 일반소환 카드) -->
+                                        <Grid Margin="20,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="150"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*" MinWidth="120"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="제물 가드 예외" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       ToolTip="제물이 부족해도 소환을 시도할 카드 (무제물 일반소환 효과가 있는 카드)"/>
+                                            <TextBlock Grid.Column="1" Text="(제물 없이 소환 가능한 카드)" VerticalAlignment="Center"
+                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                            <controls:CardNameBox Grid.Column="3" x:Name="CardTributeGuardExcept"
+                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                  ToolTip="예) 레이즈 문의 고풍 캐롤 100458017 — 제물 2장이 없어도 무제물 일반소환을 시도합니다"/>
+                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddTributeGuardExcept"
+                                                    ToolTip="선택한 카드를 제물 가드 예외 목록에 추가"/>
+                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearTributeGuardExcept"
+                                                    ToolTip="예외 목록을 비웁니다"/>
+                                        </Grid>
+                                        <TextBlock Margin="20,2,0,0" x:Name="TxtTributeGuardExcept" Text="(없음)" FontSize="11"
+                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="제물 여력 가드를 통과할 카드 목록 (B-18/B-46)"/>
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
@@ -341,6 +368,11 @@
                               SelectionChanged="OnDefaultPositionChanged"
                               ToolTip="① 행동 / ② 선택에서 표시형식을 지정하지 않은 카드를 소환할 때의 기본값 (기본: 공격 표시). 세트는 항상 뒷면 수비"/>
                 </StackPanel>
+                <CheckBox x:Name="ChkLinkPlace" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="N-5: 소환할 존을 고를 때 상대 링크 몬스터가 링크 중인 존을 피하고, 내 링크 존을 선호합니다 (기본: 꺼짐 / 링크 덱이 아니면 효과 없음)"
+                          Checked="OnLinkPlaceChanged" Unchecked="OnLinkPlaceChanged">
+                    <TextBlock Text="링크 마커 기반 존 선택 (기본: 꺼짐)" TextWrapping="Wrap"/>
+                </CheckBox>
                 <CheckBox x:Name="ChkAttackOnlyWinnable" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                           ToolTip="모든 상대를 비교해 이길 수 있는(내 공격력 &gt; 상대 공격력/수비력) 대상이 하나도 없으면 배틀 페이즈를 종료합니다. 이길 수 있으면 가장 위협적인 상대를 가장 약한 내 몬스터로 공격합니다"
                           Checked="OnAttackOnlyWinnableChanged" Unchecked="OnAttackOnlyWinnableChanged">
@@ -408,6 +440,7 @@
                                     <Button Content="카드 선택" Margin="8,0,0,0" Click="OnPickActionCard"/>
                                     <Button Content="분기 복제" Margin="8,0,0,0" Click="OnBranchAction" ToolTip="같은 카드·행동으로 조건만 다른 규칙을 복제합니다 (조건 1/2/3 분기)"/>
                                     <Button Content="엔진명=덱명" Margin="8,0,0,0" Click="OnSyncEngineToDeck"/>
+                                    <Button Content="효과번호 갱신" Margin="8,0,0,0" Click="OnRefreshEffectDescs" ToolTip="B-45: 규칙에 쓰인 카드의 Lua(SetDescription) + duel-log 관측값으로 효과번호 후보를 다시 모읍니다 (5분마다 자동)"/>
                                     <TextBlock Text="같은 카드에 규칙을 여러 개 두면 우선순위 순서로 조건을 검사합니다 (첫 번째로 참인 행동만 실행)" Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </DockPanel>
 
@@ -423,6 +456,17 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
+                                        <DataGridTemplateColumn Header="효과번호" Width="170">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox IsEditable="True" Height="24"
+                                                              ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
+                                                              DisplayMemberPath="Label"
+                                                              Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="B-45: 효과번호(desc) 필터 — 비우면 무관. [효과번호 갱신] 으로 후보를 모읍니다"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                         <DataGridTemplateColumn Header="소환 존" Width="126">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
@@ -873,7 +917,17 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="효과" Binding="{Binding EffectDesc, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                                        <DataGridTemplateColumn Header="효과" Width="170">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox IsEditable="True" Height="24"
+                                                              ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
+                                                              DisplayMemberPath="Label"
+                                                              Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="B-45: 비우면 모든 효과. 후보는 [효과번호 갱신] 으로 모읍니다"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                           <DataGridTemplateColumn Header="테마 (일반소환·세트 금지)" Width="160">
                                               <DataGridTemplateColumn.CellTemplate>
                                                   <DataTemplate>
@@ -1548,6 +1602,7 @@
         </TabControl>
     </DockPanel>
 </Window>
+
 
 
 

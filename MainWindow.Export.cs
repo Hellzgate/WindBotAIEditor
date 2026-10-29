@@ -49,6 +49,16 @@ namespace WindBotAIEditor
                 return;
             }
 
+            // DLL 은 '마지막으로 컴파일된 결과'를 그대로 담는다 → 규칙 '내용'이 바뀌었으면 경고
+            var stale = "";
+            try
+            {
+                var warn = BotPackageExporter.StaleWarning(_project, bot);
+                if (warn.Length > 0)
+                    stale = "⚠ " + warn + Environment.NewLine + Environment.NewLine;
+            }
+            catch { }
+
             Status("배포용 ZIP 생성: " + res.ZipPath);
             try
             {
@@ -61,9 +71,10 @@ namespace WindBotAIEditor
             }
             catch { }
             MessageBox.Show(
-                "배포용 ZIP 을 만들었습니다." + Environment.NewLine + Environment.NewLine + res.ZipPath + Environment.NewLine + Environment.NewLine +
+                stale + "배포용 ZIP 을 만들었습니다." + Environment.NewLine + Environment.NewLine + res.ZipPath + Environment.NewLine + Environment.NewLine +
                 "포함된 파일:" + Environment.NewLine + "  " + string.Join(Environment.NewLine + "  ", res.Files) + Environment.NewLine + Environment.NewLine +
-                "상대방은 ZIP 을 풀고 install.ps1 을 실행하면 끝입니다.",
+                "받는 사람은 ZIP 을 풀고 ① 설치.exe 더블클릭 또는 ② install.ps1 실행 또는 ③ 설치방법.txt 대로 수동 설치하면 됩니다." + Environment.NewLine +
+                "안드로이드 EDOPro 는 설치.exe/ps1 없이 설치방법.txt 의 [안드로이드] 절대로 복사하면 됩니다.",
                 "배포용 ZIP");
         }
     }

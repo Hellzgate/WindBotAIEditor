@@ -722,6 +722,9 @@ public partial class App : Application
                       ?? bots.FirstOrDefault(b => string.Equals(b.Deck, botName, StringComparison.OrdinalIgnoreCase));
             if (bot == null) { Console.Error.WriteLine("봇을 찾지 못했습니다: " + botName); return 2; }
 
+            var stale = BotPackageExporter.StaleWarning(project, bot);
+            if (stale.Length > 0) Console.WriteLine("WARN " + stale);
+
             var res = BotPackageExporter.Export(project, bot, outZip);
             if (!res.Ok) { Console.Error.WriteLine("FAILED " + res.Error); return 1; }
             Console.WriteLine("OK " + res.ZipPath);

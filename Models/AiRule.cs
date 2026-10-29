@@ -59,6 +59,21 @@ namespace WindBotAIEditor.Models
         /// <summary>소환 시 표시형식: any(자동) | attack(공격) | defense(수비)</summary>
         public string SummonPosition { get; set; } = "any";
 
+        /// <summary>B-45: 효과번호(ActivateDescription) 필터 — -1 = 무관. Activate 행에서만 사용</summary>
+        public long EffectDesc { get; set; } = -1;
+
+        /// <summary>그리드 편집용 문자열 (−1/빈칸 = 무관)</summary>
+        [JsonIgnore]
+        public string EffectDescText
+        {
+            get => EffectDesc < 0 ? "" : EffectDesc.ToString();
+            set
+            {
+                var t = (value ?? "").Trim();
+                EffectDesc = (t.Length > 0 && long.TryParse(t, out var v)) ? v : -1;
+            }
+        }
+
         [JsonIgnore]
         public PositionOption SummonPositionName
         {
@@ -753,6 +768,13 @@ namespace WindBotAIEditor.Models
         public bool AttackOnlyWinnable { get; set; } = true;
 
         /// <summary>
+        /// N-5: 링크 마커 기반 존 선택 (기본 **OFF**).
+        /// 켜면 `OnSelectPlace` 에서 **상대 링크 몬스터가 링크 중인 존을 피하고**, 내 링크 존을 선호한다.
+        /// (`ClientCard.GetLinkedZones()` 사용 — 마커→존 계산은 WindBot 이 이미 해줌)
+        /// </summary>
+        public bool LinkPlaceAware { get; set; } = false;
+
+        /// <summary>
         /// B-31: 소환 시 **기본 표시형식** (`attack` | `defense`). 기본 **attack**(공격 표시).
         /// ① 행동/② 선택 규칙에서 명시하지 않은 카드는 이 값을 쓴다 (규칙 값 `any` 도 이 값을 따른다).
         /// </summary>
@@ -784,6 +806,15 @@ namespace WindBotAIEditor.Models
         /// 가 스키마 버전을 11 로 올려 한 번만 보정한다. (소재 사용은 그대로 허용 — 릴리스만 막는다)
         /// </summary>
         public bool FreePlayProtectExtra { get; set; } = true;
+
+        /// <summary>
+        /// B-46: **제물 여력 가드(B-18) 예외 카드**. 기본 빈 목록.
+        /// `EFFECT_SUMMON_PROC` 로 **무제물 일반소환**이 가능한 카드(예: 레이즈 문의 고풍 캐롤 100458017)는
+        /// 제물이 부족해도 소환을 시도해야 하는데, B-18 가드가 막아버린다 → 이 목록의 카드는 가드를 통과시킨다.
+        /// `NeedsTributeFodder` 판정만 우회하며, 실제 소환 가능 여부는 엔진(MSG_SELECT_IDLECMD 목록)이 결정한다.
+        /// </summary>
+        public List<int> FreePlayTributeGuardExcept { get; set; } = new List<int>();
+
     }
 
     /// <summary>특정 카드의 특정 행동을 금지하는 규칙.</summary>
@@ -810,6 +841,18 @@ namespace WindBotAIEditor.Models
 
         /// <summary>특정 효과 번호 (ActivateDescription). -1 = 카드의 모든 효과</summary>
         public long EffectDesc { get; set; } = -1;
+
+        /// <summary>B-45: 그리드 편집용 문자열 (−1/빈칸 = 모든 효과)</summary>
+        [JsonIgnore]
+        public string EffectDescText
+        {
+            get => EffectDesc < 0 ? "" : EffectDesc.ToString();
+            set
+            {
+                var t = (value ?? "").Trim();
+                EffectDesc = (t.Length > 0 && long.TryParse(t, out var v)) ? v : -1;
+            }
+        }
 
         /// <summary>체인당 허용 횟수 (ChainLimit 규칙에서 사용)</summary>
         public int ChainLimit { get; set; } = 1;
@@ -1207,6 +1250,9 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "cardIsMonster",     Label = "이 카드는 몬스터", NeedsValue = false },
             new ConditionKind { Id = "cardIsSpell",       Label = "이 카드는 마법", NeedsValue = false },
             new ConditionKind { Id = "cardIsTrap",        Label = "이 카드는 함정", NeedsValue = false },
+            // N-6: 펜듈럼 (P존 = 마함존 0·4, 스케일은 ClientCard.LScale/RScale)
+            new ConditionKind { Id = "fieldHasPendulum",  Label = "필드(P존)에 펜듈럼 카드 있음", NeedsValue = false, NeedsSide = true },
+            new ConditionKind { Id = "pendulumScale",     Label = "펜듈럼 스케일이 N을 포함(레벨 N 소환 가능)", NeedsValue = true, NeedsSide = true },
         };
 
         public static ConditionKind Find(string id) =>

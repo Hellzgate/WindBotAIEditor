@@ -96,6 +96,7 @@ namespace WindBotAIEditor
             UpdateRouteTrackUi();
 
             CardPanel.ApplyCardRequested += OnApplyCardFromDb;
+            StartEffectDescTimer();   // B-45: 효과번호 후보 로드 + 5분 자동 갱신
 
             CmbRps.ItemsSource = RpsChoices;
             CmbRps.SelectedValue = "random";
@@ -291,6 +292,7 @@ namespace WindBotAIEditor
             _profile.ShowPreErrata = ChkShowPreErrata.IsChecked == true;       // B-28
             _profile.DefaultSummonPosition = (CmbDefaultPosition.SelectedValue as string) ?? "attack";   // B-31
             _profile.AttackOnlyWinnable = ChkAttackOnlyWinnable.IsChecked == true;   // B-36
+            _profile.LinkPlaceAware = ChkLinkPlace.IsChecked == true;              // N-5
             _profile.FreePlaySetSpell = ChkFreePlaySetSpell.IsChecked == true;                     // B-15
             _profile.FreePlaySetSpellKind = (CmbFreePlaySetKind.SelectedValue as string) ?? "all";
             _profile.FreePlaySetSpellExclude ??= new List<int>();
@@ -321,6 +323,7 @@ namespace WindBotAIEditor
             if (CardAvoidColumn != null) CardAvoidColumn.CardId = p.AvoidColumnCard;
             if (ChkSameNameAliases != null) ChkSameNameAliases.IsChecked = p.SameNameAliases;   // B-12
             if (ChkAttackOnlyWinnable != null) ChkAttackOnlyWinnable.IsChecked = p.AttackOnlyWinnable;   // B-36
+            if (ChkLinkPlace != null) ChkLinkPlace.IsChecked = p.LinkPlaceAware;   // N-5
             if (CmbDefaultPosition != null) CmbDefaultPosition.SelectedValue = string.IsNullOrWhiteSpace(p.DefaultSummonPosition) ? "attack" : p.DefaultSummonPosition;   // B-31
             if (ChkShowPreErrata != null) ChkShowPreErrata.IsChecked = p.ShowPreErrata;          // B-28
             Services.CardDatabase.ShowPreErrata = p.ShowPreErrata;
@@ -335,6 +338,10 @@ namespace WindBotAIEditor
 
             // B-16: 자유 플레이 엑스트라 덱 릴리스 보호 (키가 없던 구형 파일은 기본 ON)
             if (ChkFreePlayProtectExtra != null) ChkFreePlayProtectExtra.IsChecked = p.FreePlayProtectExtra;
+            // B-46: 제물 여력 가드 예외 카드
+            p.FreePlayTributeGuardExcept ??= new List<int>();
+            if (CardTributeGuardExcept != null) CardTributeGuardExcept.CardId = 0;
+            UpdateTributeGuardExceptText();
 
             _actions.Clear(); foreach (var x in p.Actions) _actions.Add(x);
             _choices.Clear(); foreach (var x in p.Choices) _choices.Add(x);
@@ -672,6 +679,7 @@ namespace WindBotAIEditor
             GridRouteConds.Items.Refresh();
             ItemsRoute?.Items.Refresh();
             UpdateFreePlaySetExcludeText();
+            UpdateTributeGuardExceptText();
         }
 
         // ================= 규칙 편집 =================
@@ -823,6 +831,13 @@ namespace WindBotAIEditor
             if (_profile != null) _profile.AttackOnlyWinnable = on;
             Status("이길 수 없으면 공격하지 않음: " + (on ? "ON" : "OFF"));
         }
+        /// <summary>N-5: 링크 마커 기반 존 선택 토글</summary>
+        private void OnLinkPlaceChanged(object sender, RoutedEventArgs e)
+        {
+            bool on = ChkLinkPlace.IsChecked == true;
+            if (_profile != null) _profile.LinkPlaceAware = on;
+            Status("링크 마커 기반 존 선택: " + (on ? "ON" : "OFF"));
+        }
         /// <summary>B-32: 조건의 테마 제외 카드 목록을 비운다 (셀 안의 × 버튼)</summary>
         private void OnClearCondExclude(object sender, RoutedEventArgs e)
         {
@@ -918,6 +933,53 @@ namespace WindBotAIEditor
             if (CardFreePlaySetExclude != null) CardFreePlaySetExclude.CardId = 0;
             UpdateFreePlaySetExcludeText();
             Status("세트 제외 카드 목록을 비웠습니다");
+        }
+
+        /// <summary>B-46: 제물 여력 가드 예외 목록 표시</summary>
+        private void UpdateTributeGuardExceptText()
+        {
+            if (TxtTributeGuardExcept == null) return;
+            var ids = _profile?.FreePlayTributeGuardExcept;
+            if (ids == null || ids.Count == 0) { TxtTributeGuardExcept.Text = "(없음)"; return; }
+            var sb = new System.Text.StringBuilder();
+            foreach (var id in ids)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                var name = CardDatabase.Instance.NameOf(id);
+                sb.Append(name.Length > 0 ? name : id.ToString());
+            }
+            TxtTributeGuardExcept.Text = sb.ToString();
+        }
+
+        private void OnAddTributeGuardExcept(object sender, RoutedEventArgs e)
+            => AddTributeGuardExcept(CardTributeGuardExcept?.CardId ?? 0);
+
+        private void OnClearTributeGuardExcept(object sender, RoutedEventArgs e) => ClearTributeGuardExcept();
+
+        /// <summary>B-46: 예외 카드 추가 본체 (UI/uicheck 공용)</summary>
+        private bool AddTributeGuardExcept(int id)
+        {
+            if (id <= 0)
+            {
+                Status("제물 가드 예외: 카드명을 검색해 고른 뒤 [추가] 를 누르세요");
+                return false;
+            }
+            _profile.FreePlayTributeGuardExcept ??= new List<int>();
+            if (!_profile.FreePlayTributeGuardExcept.Contains(id))
+                _profile.FreePlayTributeGuardExcept.Add(id);
+            if (CardTributeGuardExcept != null) CardTributeGuardExcept.CardId = 0;
+            UpdateTributeGuardExceptText();
+            Status("제물 가드 예외 추가: " + id + " (총 " + _profile.FreePlayTributeGuardExcept.Count + "개)");
+            return true;
+        }
+
+        /// <summary>B-46: 예외 목록 비우기 본체</summary>
+        private void ClearTributeGuardExcept()
+        {
+            _profile.FreePlayTributeGuardExcept?.Clear();
+            if (CardTributeGuardExcept != null) CardTributeGuardExcept.CardId = 0;
+            UpdateTributeGuardExceptText();
+            Status("제물 가드 예외 목록을 비웠습니다");
         }
 
         private void OnAddForbid(object sender, RoutedEventArgs e)
@@ -1771,8 +1833,8 @@ namespace WindBotAIEditor
                 "TxtEngineName", "TxtEngineDesc", "ChkFreePlay", "ChkDebugEffect", "CmbRps", "CmbTurnChoice",
                 "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
                 "ChkFreePlaySetSpell", "CmbFreePlaySetKind", "CardFreePlaySetExclude", "TxtFreePlaySetExclude", "PnlFreePlaySetSpell",
-                "ChkFreePlayProtectExtra",
-                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable",
+                "ChkFreePlayProtectExtra", "CardTributeGuardExcept", "TxtTributeGuardExcept",
+                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace",
                 "BtnPreReleaseConvert", "TxtPreReleaseWarn",
                 "TxtRuleSummary", "TxtProfilePath", "TxtBuildLog",
                 "ListDecks", "TxtDeck", "TxtDeckCardFilter", "ListDeckCards", "TxtDeckInfo",
@@ -2641,7 +2703,8 @@ namespace WindBotAIEditor
             var helperOk = srcOn.IndexOf("private static bool NeedsTributeFodder(ClientField f, ClientCard c)", StringComparison.Ordinal) >= 0;
             var helperOnce = OverrideCount(srcOn, "private static bool NeedsTributeFodder(") == 1;
             var guardOk = OverrideCount(srcOn, "ExecutorType.Summon, () => ") == 1
-                          && srcOn.IndexOf("&& !NeedsTributeFodder(Bot, Card)); // 자유 플레이: 제물 여력 없으면 소환 시도 안 함", StringComparison.Ordinal) >= 0;
+                          && srcOn.IndexOf("NeedsTributeFodder(Bot, Card)", StringComparison.Ordinal) >= 0
+                          && srcOn.IndexOf("자유 플레이: 제물 여력 없으면 소환 시도 안 함", StringComparison.Ordinal) >= 0;
             // 필요 제물 수: 레벨 5~6 = 1, 7+ = 2
             var levelOk = srcOn.IndexOf("int need = c.Level >= 7 ? 2 : (c.Level >= 5 ? 1 : 0);", StringComparison.Ordinal) >= 0;
             // 엑스트라 덱 몬스터는 제물 여력으로 세지 않는다 (IsExtraDeckMonster 재사용 = 중복 정의 없음)
@@ -2653,6 +2716,21 @@ namespace WindBotAIEditor
             if (!levelOk) problems.Add("B-18: 필요 제물 수 식(레벨 5~6=1 / 7+=2)이 다름");
             if (!reuseOk) problems.Add("B-18: 엑스트라 덱 몬스터 제외가 없거나 IsExtraDeckMonster 가 중복 정의됨");
 
+
+            // B-46: 제물 여력 가드 예외 카드 (무제물 일반소환) — 헬퍼 1개 + OR 완화
+            prof.FreePlayTributeGuardExcept = new List<int> { 100458017 };
+            var srcEx = RuleCodeGen.Generate(prof);
+            var b46Helper = srcEx.IndexOf("private static bool IsTributeGuardExempt(ClientCard c)", StringComparison.Ordinal) >= 0
+                            && OverrideCount(srcEx, "private static bool IsTributeGuardExempt(") == 1;
+            var b46Or = srcEx.IndexOf("(!NeedsTributeFodder(Bot, Card) || IsTributeGuardExempt(Card))", StringComparison.Ordinal) >= 0;
+            var b46Code = srcEx.IndexOf("c.IsCode(100458017)", StringComparison.Ordinal) >= 0;
+            prof.FreePlayTributeGuardExcept = new List<int>();
+            var srcNoEx = RuleCodeGen.Generate(prof);
+            var b46Off = srcNoEx.IndexOf("IsTributeGuardExempt", StringComparison.Ordinal) < 0;
+            if (!b46Helper) problems.Add("B-46: 예외 목록이 있는데 IsTributeGuardExempt 헬퍼가 없음");
+            if (!b46Or) problems.Add("B-46: 가드가 OR 로 완화되지 않음");
+            if (!b46Code) problems.Add("B-46: 예외 카드 ID 가 헬퍼에 없음");
+            if (!b46Off) problems.Add("B-46: 예외 목록이 비었는데 헬퍼가 생성됨");
             // 2) 옵션 OFF → 0회 (회귀)
             prof.FreePlayProtectExtra = false;
             var srcOff = RuleCodeGen.Generate(prof);
@@ -2675,7 +2753,8 @@ namespace WindBotAIEditor
                          " reuse=" + (reuseOk ? "OK" : "NG") +
                          " off=0/" + (offOk ? "OK" : "NG") +
                          " onOffLines=" + diffLines +
-                         " actionSummon=" + (actionOk ? "OK" : "NG");
+                         " actionSummon=" + (actionOk ? "OK" : "NG") +
+                         " b46=" + (b46Helper && b46Or && b46Code && b46Off ? "OK" : "NG");
             return problems;
         }
 

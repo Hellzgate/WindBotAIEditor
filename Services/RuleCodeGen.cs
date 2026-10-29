@@ -148,6 +148,12 @@ namespace WindBotAIEditor.Services
             bool needTributeGuard = protectExtra && p.FreePlay && !actions.Any(a =>
                 string.Equals(a.Type, "Summon", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(a.Type, "SummonOrSet", StringComparison.OrdinalIgnoreCase));
+            // B-46: 제물 여력 가드 예외 카드 (무제물 일반소환 카드) — 별칭 확장 포함
+            List<int> tributeGuardExcept = new List<int>();
+            if (needTributeGuard && p.FreePlayTributeGuardExcept != null)
+                foreach (var cid in p.FreePlayTributeGuardExcept)
+                    foreach (var aid in AliasIds(cid))
+                        if (!tributeGuardExcept.Contains(aid)) tributeGuardExcept.Add(aid);
 
             // ActivatingCard() 는 NoTarget 금지 또는 whenCard 선택규칙에서 필요하다
             // codeMatch(특정 카드 우선) 규칙이 있으면 HasCode 헬퍼가 필요하다 (없으면 다음 규칙으로 넘어감)
@@ -245,7 +251,7 @@ namespace WindBotAIEditor.Services
                 EmitFreePlay(sb, actions, triggers, stopOthers, p.DebugEffectLog, effectBlocks.Count > 0,
                     forbidSummon.Count > 0, forbidNoUse.Count > 0,
                     p.FreePlaySetSpell, p.FreePlaySetSpellKind, p.FreePlaySetSpellExclude, needTributeGuard,
-                    forbidThemeSummon.Count > 0);
+                    forbidThemeSummon.Count > 0, tributeGuardExcept);
 
             // ---- 소환 금지 (턴 조건 반영) ----
             foreach (var f in forbidSummon)
@@ -292,23 +298,31 @@ namespace WindBotAIEditor.Services
             {
                 sb.AppendLine();
                 sb.AppendLine("        // B-27: 결정 로그 — 콘솔 + %LOCALAPPDATA%\\WindBotAIEditor\\duel-log.txt (2MB 넘으면 새로 시작)");
+                sb.AppendLine("        // B-42: 안드로이드 Mono BCL 은 ILLink 로 트리밍되어 일부 API 가 **없다**. 아래 조합만 사용한다.");
+                sb.AppendLine("        //   없음: File.AppendAllText / File.WriteAllText / File.ReadAllText / Path.GetTempPath / FileSystemInfo.Delete");
+                sb.AppendLine("        //   있음: File.AppendText · StreamWriter.WriteLine · FileInfo.Length · File.Delete · Path.Combine · Directory.*");
                 sb.AppendLine("        private static readonly object _logLock = new object();");
                 sb.AppendLine("        private static void LogLine(string msg)");
                 sb.AppendLine("        {");
-                sb.AppendLine("            Console.WriteLine(msg);");
-                sb.AppendLine("            try");
+                sb.AppendLine("            try { Console.WriteLine(msg); } catch { }");
+                sb.AppendLine("            try { LogToFile(msg); } catch { }   // B-42: 파일 로그는 어떤 예외도 밖으로 내보내지 않는다");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // B-42: 트리밍된 BCL 에서 누락 메서드가 있으면 JIT 시점에 죽으므로, 검증된 API 만 쓰는 별도 메서드로 분리");
+                sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
+                sb.AppendLine("        private static void LogToFile(string msg)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);");
+                sb.AppendLine("            string dir = System.IO.Path.Combine(baseDir, \"WindBotAIEditor\");");
+                sb.AppendLine("            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);");
+                sb.AppendLine("            string path = System.IO.Path.Combine(dir, \"duel-log.txt\");");
+                sb.AppendLine("            lock (_logLock)");
                 sb.AppendLine("            {");
-                sb.AppendLine("                string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), \"WindBotAIEditor\");");
-                sb.AppendLine("                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);");
-                sb.AppendLine("                string path = System.IO.Path.Combine(dir, \"duel-log.txt\");");
-                sb.AppendLine("                lock (_logLock)");
-                sb.AppendLine("                {");
-                sb.AppendLine("                    System.IO.FileInfo fi = new System.IO.FileInfo(path);");
-                sb.AppendLine("                    if (fi.Exists && fi.Length > 2097152) fi.Delete();");
-                sb.AppendLine("                    System.IO.File.AppendAllText(path, DateTime.Now.ToString(\"HH:mm:ss\") + \" \" + msg + Environment.NewLine);");
-                sb.AppendLine("                }");
+                sb.AppendLine("                System.IO.FileInfo fi = new System.IO.FileInfo(path);");
+                sb.AppendLine("                if (fi.Exists && fi.Length > 2097152) System.IO.File.Delete(path);");
+                sb.AppendLine("                using (System.IO.StreamWriter w = System.IO.File.AppendText(path))");
+                sb.AppendLine("                    w.WriteLine(DateTime.Now.ToString(\"HH:mm:ss\") + \" \" + msg);");
                 sb.AppendLine("            }");
-                sb.AppendLine("            catch { }");
                 sb.AppendLine("        }");
                 sb.AppendLine();
                 sb.AppendLine("        // B-27: SelectCard 결과 로그 (누가/몇 장/힌트/무엇을 골랐는지)");
@@ -342,11 +356,11 @@ namespace WindBotAIEditor.Services
             }
 
             if (!string.IsNullOrWhiteSpace(p.DialogFile))
-                EmitDialogs(sb, p.DialogFile);
+                EmitDialogs(sb, p.DialogFile, cls);
 
             // ---- 존 지정 (소환 존 / 마함 열 회피) ----
             var zoneActions = actions.Where(a => a.Card > 0 && (a.SummonZone == "main" || a.SummonZone == "extra")).ToList();
-            if (zoneActions.Count > 0 || avoidColumnCard > 0)
+            if (zoneActions.Count > 0 || avoidColumnCard > 0 || placeRules.Count > 0 || p.LinkPlaceAware)   // N-5: 링크 존 선택 시에도 생성
             {
                 sb.AppendLine();
                 if (avoidColumnCard > 0)
@@ -406,6 +420,40 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("                }");
                     sb.AppendLine("            }");
                 }
+                // N-5: 링크 마커 기반 존 점수 (상대 링크 존 회피 → 내 링크 존 선호)
+                if (p.LinkPlaceAware)
+                {
+                    sb.AppendLine("            if (player == 0 && location == CardLocation.MonsterZone)");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                // N-5: 상대 링크가 걸린 존은 -2, 내 링크 존은 +1 (GetLinkedZones 는 WindBot 이 계산)");
+                    sb.AppendLine("                int enemyLinked = 0;");
+                    sb.AppendLine("                if (Enemy.MonsterZone != null)");
+                    sb.AppendLine("                    for (int i = 0; i < Enemy.MonsterZone.Length; i++)");
+                    sb.AppendLine("                    {");
+                    sb.AppendLine("                        ClientCard e = Enemy.MonsterZone[i];");
+                    sb.AppendLine("                        if (e != null && (e.Type & 0x4000000) != 0) enemyLinked |= e.GetLinkedZones();");
+                    sb.AppendLine("                    }");
+                    sb.AppendLine("                int ourLinked = 0;");
+                    sb.AppendLine("                if (Bot.MonsterZone != null)");
+                    sb.AppendLine("                    for (int i = 0; i < Bot.MonsterZone.Length; i++)");
+                    sb.AppendLine("                    {");
+                    sb.AppendLine("                        ClientCard m = Bot.MonsterZone[i];");
+                    sb.AppendLine("                        if (m != null && (m.Type & 0x4000000) != 0) ourLinked |= m.GetLinkedZones();");
+                    sb.AppendLine("                    }");
+                    sb.AppendLine("                int bestBit = 0;");
+                    sb.AppendLine("                int bestScore = -99;");
+                    sb.AppendLine("                for (int i = 0; i < 7; i++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    int bit = 1 << i;");
+                    sb.AppendLine("                    if ((available & bit) == 0) continue;");
+                    sb.AppendLine("                    int score = 0;");
+                    sb.AppendLine("                    if ((enemyLinked & bit) != 0) score -= 2;");
+                    sb.AppendLine("                    if ((ourLinked & bit) != 0) score += 1;");
+                    sb.AppendLine("                    if (score > bestScore) { bestScore = score; bestBit = bit; }");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("                if (bestBit != 0) return bestBit;");
+                    sb.AppendLine("            }");
+                }
                 sb.AppendLine("            return base.OnSelectPlace(cardId, player, location, available);");
                 sb.AppendLine("        }");
                 if (zoneActions.Count > 0)
@@ -426,12 +474,28 @@ namespace WindBotAIEditor.Services
             }
             // ---- 소환 시 표시형식 (공격/수비) ----
             var posActions = actions.Where(a => a.Card > 0 && (a.SummonPosition == "attack" || a.SummonPosition == "defense")).ToList();
-            if (posActions.Count > 0)
+            // B-40: 토큰은 수비 표시로 — 규칙 유무와 무관하게 이 오버라이드는 항상 생성한다
             {
+                sb.AppendLine();
+                sb.AppendLine("        // B-40: 필드의 토큰 판정 (Data.Type 0x4000)");
+                sb.AppendLine("        private bool IsTokenOnField(int cardId)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            foreach (var c in Bot.MonsterZone)");
+                sb.AppendLine("                if (c != null && c.Id == cardId && (c.Type & 0x4000) != 0) return true;");
+                sb.AppendLine("            foreach (var c in Enemy.MonsterZone)");
+                sb.AppendLine("                if (c != null && c.Id == cardId && (c.Type & 0x4000) != 0) return true;");
+                sb.AppendLine("            return false;");
+                sb.AppendLine("        }");
                 sb.AppendLine();
                 sb.AppendLine("        // ---- 소환 시 표시형식 (공격/수비) ----");
                 sb.AppendLine("        public override CardPosition OnSelectPosition(int cardId, IList<CardPosition> positions)");
                 sb.AppendLine("        {");
+                sb.AppendLine("            // B-40: 토큰은 항상 수비 (공격으로 세울 이유가 없다)");
+                sb.AppendLine("            if (IsTokenOnField(cardId) && positions != null)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (positions.Contains(CardPosition.FaceUpDefence)) return CardPosition.FaceUpDefence;");
+                sb.AppendLine("                if (positions.Contains(CardPosition.FaceDownDefence)) return CardPosition.FaceDownDefence;");
+                sb.AppendLine("            }");
                 if (positionRules.Count > 0)
                 {
                     sb.AppendLine("            int rulePos = SelectPositionByRule(cardId, positions);");
@@ -983,7 +1047,15 @@ namespace WindBotAIEditor.Services
                 if (dbgOption)
                 {
                     if (!done) sb.AppendLine("            if (idx < 0) idx = base.OnSelectOption(options);   // 조건 불충족 → 기본 동작 (로그는 1회)");
-                    sb.AppendLine("            LogLine(\"[AI-EDITOR] option card=\" + (Card != null ? Card.Id.ToString() : \"-\") + \" desc=\" + (options.Count > 0 ? options[0].ToString() : \"-\") + \" -> \" + idx.ToString());   // B-27: 콘솔 + 파일");
+                    // 옵션 **전체 목록**을 남긴다 (무제물/제물 같은 소환 방법 선택 인덱스를 알아내기 위해)
+                    sb.AppendLine("            string optStr = \"\";");
+                    sb.AppendLine("            if (options != null)");
+                    sb.AppendLine("                for (int oi = 0; oi < options.Count; oi++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    if (oi > 0) optStr += \",\";");
+                    sb.AppendLine("                    optStr += options[oi].ToString();");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("            LogLine(\"[AI-EDITOR] option card=\" + (Card != null ? Card.Id.ToString() : \"-\") + \" n=\" + (options != null ? options.Count : 0) + \" opts=[\" + optStr + \"] -> \" + idx.ToString());   // B-27: 콘솔 + 파일");
                     sb.AppendLine("            return idx;");
                 }
                 else if (!done) sb.AppendLine("            return base.OnSelectOption(options);   // 조건 불충족 → 기본 동작");
@@ -1075,18 +1147,7 @@ namespace WindBotAIEditor.Services
             // 표시형식: 소환 표시형식(공격/수비)이 같은 메서드를 쓰므로, 그때는 헬퍼만 만들고 위에서 호출한다
             if (positionRules.Count > 0)
             {
-                bool mergedPosition = posActions.Count > 0;
-                if (!mergedPosition)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("        // ---- 선택 규칙: 표시형식 ----");
-                    sb.AppendLine("        public override CardPosition OnSelectPosition(int cardId, IList<CardPosition> positions)");
-                    sb.AppendLine("        {");
-                    sb.AppendLine("            int rulePos = SelectPositionByRule(cardId, positions);");
-                    sb.AppendLine("            if (rulePos >= 0) return (CardPosition)rulePos;   // ② 선택 규칙(조건 포함)이 먼저");
-                    sb.AppendLine("            return base.OnSelectPosition(cardId, positions);");
-                    sb.AppendLine("        }");
-                }
+                // B-40: OnSelectPosition 오버라이드는 위에서 항상 생성되므로(토큰 규칙), 여기서는 헬퍼만 만든다
                 sb.AppendLine();
                 sb.AppendLine("        // ② 표시형식 규칙 — 조건을 순서대로 검사, 모두 불충족이면 -1 (기본 동작)");
                 sb.AppendLine("        private int SelectPositionByRule(int cardId, IList<CardPosition> positions)");
@@ -1142,6 +1203,7 @@ namespace WindBotAIEditor.Services
             bool needLevel = allConds.Any(c => c.Kind == "fieldHasLevel");
             bool needLevelCount = allConds.Any(c => c.Kind == "fieldLevelCount");   // B-20
             bool needEmz = allConds.Any(c => c.Kind == "fieldCardInEmz");           // B-20
+            bool needPendulum = allConds.Any(c => c.Kind == "fieldHasPendulum" || c.Kind == "pendulumScale");   // N-6
             bool needRank = allConds.Any(c => c.Kind == "fieldHasRank");
             bool needLink = allConds.Any(c => c.Kind == "fieldHasLink");
             bool needRace = allConds.Any(c => c.Kind == "fieldHasRace");
@@ -1293,6 +1355,27 @@ namespace WindBotAIEditor.Services
                 "                if (level == 0 ? c.Level > 0 : c.Level == level) n++;",
                 "            }",
                 "            return n;"));
+            // N-6: 펜듈럼 — P존(마함존 0·4) 카드 수와 스케일 범위 (ClientCard.LScale/RScale)
+            if (needPendulum) sb.Append(StaticHelper("PendulumCount", "int", "ClientField f",
+                "            if (f == null || f.SpellZone == null) return 0;",
+                "            int n = 0;",
+                "            for (int i = 0; i < f.SpellZone.Length && i < 5; i++)",
+                "            {",
+                "                ClientCard c = f.SpellZone[i];",
+                "                if (c != null && (c.Type & 0x1000000) != 0) n++;   // 펜듈럼",
+                "            }",
+                "            return n;"));
+            if (needPendulum) sb.Append(StaticHelper("PendulumCovers", "bool", "ClientField f, int level",
+                "            if (f == null || f.SpellZone == null) return false;",
+                "            int low = 99, high = 0;",
+                "            for (int i = 0; i < f.SpellZone.Length && i < 5; i++)",
+                "            {",
+                "                ClientCard c = f.SpellZone[i];",
+                "                if (c == null || (c.Type & 0x1000000) == 0) continue;",
+                "                if (c.LScale > 0 && c.LScale < low) low = c.LScale;",
+                "                if (c.RScale > 0 && c.RScale > high) high = c.RScale;",
+                "            }",
+                "            return high > low && level > low && level < high;   // 스케일 사이(양 끝 제외)"));
             // B-21: 같은 카드가 테마 + 종족 + 엑시즈를 모두 만족하는지 (0 = 해당 검사 생략)
             if (needThemeRaceXyz) sb.Append(StaticHelper("FieldHasThemeRaceXyz", "bool", "ClientField f, int theme, ulong race",
                 "            if (f == null || f.MonsterZone == null) return false;",
@@ -1446,6 +1529,17 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("            return have < need;");
                     sb.AppendLine("        }");
                     sb.AppendLine();
+                    // B-46: 가드 예외 카드 (무제물 일반소환 카드 — 제물이 없어도 소환 시도)
+                    if (tributeGuardExcept.Count > 0)
+                    {
+                        sb.AppendLine("        // B-46: 제물 여력 가드 예외 — EFFECT_SUMMON_PROC 로 무제물 일반소환하는 카드");
+                        sb.AppendLine("        private static bool IsTributeGuardExempt(ClientCard c)");
+                        sb.AppendLine("        {");
+                        sb.AppendLine("            if (c == null) return false;");
+                        sb.AppendLine("            return " + string.Join(" || ", tributeGuardExcept.Select(x => "c.IsCode(" + x + ")")) + ";");
+                        sb.AppendLine("        }");
+                        sb.AppendLine();
+                    }
                 }
             }
 
@@ -1798,8 +1892,15 @@ namespace WindBotAIEditor.Services
 
         private static void EmitFreePlay(StringBuilder sb, List<ActionRule> actions, List<FinishTrigger> triggers,
             bool stopOthers, bool debugLog, bool hasEffectBlock, bool hasSummonForbid, bool hasNoUseForbid,
-            bool setSpell, string setSpellKind, List<int> setSpellExclude, bool tributeGuard, bool themeNormalForbid)
+            bool setSpell, string setSpellKind, List<int> setSpellExclude, bool tributeGuard, bool themeNormalForbid,
+            List<int> tributeGuardExcept)
         {
+            // B-46: 제물 여력 가드에 예외 카드가 있으면 판정을 OR 로 완화한다
+            string tribGuardExpr = "";
+            if (tributeGuard)
+                tribGuardExpr = (tributeGuardExcept != null && tributeGuardExcept.Count > 0)
+                    ? " && (!NeedsTributeFodder(Bot, Card) || IsTributeGuardExempt(Card))"
+                    : " && !NeedsTributeFodder(Bot, Card)";
             var used = new HashSet<string>(actions.Select(x => x.Type), StringComparer.OrdinalIgnoreCase);
             string condGuard = stopOthers ? "!BuildComplete() && " : "";
             var guardParts = new List<string>();
@@ -1812,7 +1913,7 @@ namespace WindBotAIEditor.Services
             if (!used.Contains("Summon") && !used.Contains("SummonOrSet"))
                 sb.AppendLine("            AddExecutor(ExecutorType.Summon, () => " + condGuard + cardGuard
                               + (themeNormalForbid ? " && !IsForbiddenThemeNormalSummon(Card)" : "")
-                              + (tributeGuard ? " && !NeedsTributeFodder(Bot, Card)" : "")
+                              + tribGuardExpr
                               + (tributeGuard
                                   ? "); // 자유 플레이: 제물 여력 없으면 소환 시도 안 함"
                                   : "); // 자유 플레이"));
@@ -1823,7 +1924,7 @@ namespace WindBotAIEditor.Services
             if (!used.Contains("MonsterSet") && !used.Contains("SummonOrSet"))
                 sb.AppendLine("            AddExecutor(ExecutorType.MonsterSet, () => " + condGuard + cardGuard
                               + (themeNormalForbid ? " && !IsForbiddenThemeNormalSummon(Card)" : "")
-                              + (tributeGuard ? " && !NeedsTributeFodder(Bot, Card)" : "")
+                              + tribGuardExpr
                               + (tributeGuard
                                   ? "); // 자유 플레이: 제물 여력 없으면 세트 시도 안 함"
                                   : "); // 자유 플레이"));
@@ -2037,7 +2138,7 @@ namespace WindBotAIEditor.Services
         }
 
         /// <summary>이 엔진 전용 대사: 런타임에 WindBot Dialogs 인스턴스의 문자열을 교체한다.</summary>
-        private static void EmitDialogs(StringBuilder sb, string file)
+        private static void EmitDialogs(StringBuilder sb, string file, string cls)
         {
             var name = System.IO.Path.GetFileNameWithoutExtension(file ?? "");
             if (string.IsNullOrWhiteSpace(name)) return;
@@ -2063,10 +2164,22 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("            _dlgApplied = true;");
             sb.AppendLine("            try");
             sb.AppendLine("            {");
-            sb.AppendLine("                string path = Path.Combine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, \"Dialogs\"), \"" + name + ".json\");");
-            sb.AppendLine("                if (!File.Exists(path))");
+            sb.AppendLine("                // B-43: 대사 파일 경로 후보 — 실행기 DLL 위치(Executors) 기준 → AppDomain → 상대 경로");
+            sb.AppendLine("                //   (안드로이드에서는 AppDomain.BaseDirectory 가 WindBot 폴더가 아니라서 못 찾는다)");
+            sb.AppendLine("                string path = null;");
+            sb.AppendLine("                string asmDir = null;");
+            sb.AppendLine("                try { asmDir = Path.GetDirectoryName(typeof(" + cls + ").Assembly.Location); } catch { }");
+            sb.AppendLine("                string root = null;");
+            sb.AppendLine("                if (asmDir != null && asmDir.Length > 0) root = Path.GetDirectoryName(asmDir);");
+            sb.AppendLine("                string[] cand = new string[3];");
+            sb.AppendLine("                cand[0] = (root != null && root.Length > 0) ? Path.Combine(Path.Combine(root, \"Dialogs\"), \"" + name + ".json\") : null;");
+            sb.AppendLine("                cand[1] = Path.Combine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, \"Dialogs\"), \"" + name + ".json\");");
+            sb.AppendLine("                cand[2] = Path.Combine(\"Dialogs\", \"" + name + ".json\");");
+            sb.AppendLine("                for (int i = 0; i < cand.Length; i++)");
+            sb.AppendLine("                    if (cand[i] != null && cand[i].Length > 0 && File.Exists(cand[i])) { path = cand[i]; break; }");
+            sb.AppendLine("                if (path == null)");
             sb.AppendLine("                {");
-            sb.AppendLine("                    Console.WriteLine(\"[AI-EDITOR] dialog file not found: \" + path);");
+            sb.AppendLine("                    Console.WriteLine(\"[AI-EDITOR] dialog file not found. tried: \" + (cand[0] == null ? \"-\" : cand[0]) + \" | \" + cand[1]);");
             sb.AppendLine("                    return;");
             sb.AppendLine("                }");
             sb.AppendLine("                DataContractJsonSerializer ser = new DataContractJsonSerializer(typeof(DlgData));");
@@ -2755,8 +2868,9 @@ namespace WindBotAIEditor.Services
         {
             bool hasCond = a.Conditions.Count > 0;
             bool needGuard = guardEffect && string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase);
+            bool hasDesc = string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase) && a.EffectDesc >= 0;   // B-45
 
-            if (!hasCond && !stopWhenComplete && !needGuard)
+            if (!hasCond && !stopWhenComplete && !needGuard && !hasDesc)
             {
                 return card > 0
                     ? $"AddExecutor(ExecutorType.{a.Type}, {card})"
@@ -2765,6 +2879,9 @@ namespace WindBotAIEditor.Services
 
             var expr = hasCond ? ConditionExpression(a.Conditions) : "true";
             if (stopWhenComplete) expr = "!BuildComplete() && (" + expr + ")";
+            // B-45: 효과번호(desc) 필터 — Activate 행에서만
+            if (string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase) && a.EffectDesc >= 0)
+                expr = "(ActivateDescription == " + a.EffectDesc + ") && (" + expr + ")";
             if (needGuard) expr = "!IsForbiddenEffect(Card, ActivateDescription) && (" + expr + ")";
             var func = "() => " + expr;
 
@@ -2861,6 +2978,9 @@ namespace WindBotAIEditor.Services
                 case "fieldHasTunerLevel": return $"FieldHasTuner({SideExpr(c)}, {c.Value})";
                 case "fieldCardInEmz": return CallOr(x => "FieldHasCardInEmz(" + SideExpr(c) + ", " + x + ")", c.Card);
                 case "fieldLevelCount": return $"CountLevels({SideExpr(c)}, {c.Value}, true) {CountOp(c)} {Math.Max(1, c.Count)}";
+                // N-6: 펜듈럼
+                case "fieldHasPendulum": return $"PendulumCount({SideExpr(c)}) > 0";
+                case "pendulumScale": return $"PendulumCovers({SideExpr(c)}, {c.Value})";
                 // B-21: 테마 + 종족 + 엑시즈를 "같은 카드"가 모두 만족 (0 = 해당 검사 생략)
                 case "fieldHasThemeRaceXyz": return $"FieldHasThemeRaceXyz({SideExpr(c)}, {c.ThemeCode}, {c.RaceId})";
                 case "amFirst": return "Duel.IsFirst";
@@ -2891,6 +3011,7 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
 
 
 

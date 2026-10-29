@@ -7,9 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.4.0</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-    <FileVersion>1.4.0.0</FileVersion>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <Product>WindBot AI Editor</Product>
   </PropertyGroup>
 
@@ -31,9 +31,17 @@
     <Compile Remove="install-assets\**" />
     <!-- (2026-10-29) 봇 패키지는 V3 형식(6파일)만 — 설치.exe/카드 데이터는 배포본에 넣지 않는다 -->
     <None Remove="install-assets\**" />
+    <!-- (2026-10-29) 컴파일된 설치.exe 는 ZIP 자동 포함을 위해 출력/게시 폴더로 함께 복사 -->
+    <None Include="install-assets\설치.exe" Condition="Exists('install-assets\설치.exe')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- (2026-10-29) publish 는 None+CopyToPublishDirectory 를 단일파일 게시에서 놓치는 경우가 있어 명시적으로 복사 -->
+  <Target Name="CopyInstallerToPublish" AfterTargets="Publish" Condition="Exists('install-assets\설치.exe')">
+    <Copy SourceFiles="install-assets\설치.exe" DestinationFolder="$(PublishDir)install-assets" />
+  </Target>
+
 </Project>
+
 
 
 

@@ -1,5 +1,9 @@
 # WindBot AI 에디터
 
+> **초보자용 전체 사용법: [MANUAL.md](MANUAL.md)** — 설치, 5분 시작, 규칙 ①~⑤, 배포(ZIP/Android), 로그, 문제 해결
+>
+> **사진으로 따라하기: [docs/tutorial/TUTORIAL.md](docs/tutorial/TUTORIAL.md)** — 화면 8장에 번호를 붙인 8단계 실습판
+
 **덱을 지정하고, 그 AI가 할 행동을 유희왕식 규칙으로 편집해 저장한 뒤, 그 AI로 듀얼**하는 도구.
 
 - UI: WPF (.NET 8)
@@ -525,3 +529,5 @@ MIT — LICENSE 참고.
 
 빌드된 실행 파일은 [Releases](https://github.com/Hellzgate/WindBotAIEditor/releases) 에서 받을 수 있다.
 (.NET 설치 불필요 · Windows x64)
+
+
