@@ -365,8 +365,19 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine();
                 if (avoidColumnCard > 0)
                 {
-                    sb.AppendLine("        private int _avoidColumn = -1;   // 이번 턴 무효 열 (세트에서 발동된 " + avoidColumnCard + ")");
+                    sb.AppendLine("        private int _avoidColumn = -1;   // 이번 턴 무효 열 — **내 쪽 인덱스** (세트에서 발동된 " + avoidColumnCard + ")");
                     sb.AppendLine("        private int _avoidTurn = -1;");
+                    sb.AppendLine();
+                    // B-47: 코어는 상대 마함존을 좌우 반전(4-seq)으로 취급한다 → 같은 '세로열'을 내 인덱스로 환산
+                    sb.AppendLine("        // B-47: 상대 필드는 좌우가 뒤집혀 보인다 → 같은 세로열 = 4 - seq (상대 카드일 때)");
+                    sb.AppendLine("        private static int AvoidColumnOf(ClientCard c)");
+                    sb.AppendLine("        {");
+                    sb.AppendLine("            if (c == null) return -1;");
+                    sb.AppendLine("            int col = c.Sequence;");
+                    sb.AppendLine("            if (col < 0 || col > 4) return -1;");
+                    sb.AppendLine("            if (c.Controller != 0) col = 4 - col;");
+                    sb.AppendLine("            return col;");
+                    sb.AppendLine("        }");
                     sb.AppendLine();
                 }
                 sb.AppendLine("        // ---- 존 지정 (소환 존 / 마함 열 회피) ----");
@@ -605,10 +616,10 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            // " + avoidColumnCard + " 가 마함존에서 발동하면(=세트에서 발동) 그 열의 다른 마함이 이 턴 무효 → 열을 기억");
                         sb.AppendLine("            if (card != null && " + IsCodeOr("card", avoidColumnCard) + " && card.Location == CardLocation.SpellZone)");
                         sb.AppendLine("            {");
-                        sb.AppendLine("                _avoidColumn = card.Sequence;");
-                        sb.AppendLine("                _avoidTurn = Duel.Turn;");
+                        sb.AppendLine("                int avoidCol = AvoidColumnOf(card);");
+                        sb.AppendLine("                if (avoidCol >= 0) { _avoidColumn = avoidCol; _avoidTurn = Duel.Turn; }");
                         if (p.DebugEffectLog)
-                            sb.AppendLine("                Console.WriteLine(\"[AI-EDITOR] avoid-column col=\" + _avoidColumn.ToString() + \" who=\" + player.ToString() + \" turn=\" + _avoidTurn.ToString());");
+                            sb.AppendLine("                LogLine(\"[AI-EDITOR] avoid-column col=\" + _avoidColumn.ToString() + \" who=\" + player.ToString() + \" turn=\" + _avoidTurn.ToString());");   // B-47: 파일 로그
                         sb.AppendLine("            }");
                     }
                     sb.AppendLine("            base.OnChaining(player, card);");
@@ -687,8 +698,8 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("            // " + avoidColumnCard + " 를 세트에서 발동하면 그 열의 다른 마함이 이 턴 무효가 된다 → 열을 기억");
                     sb.AppendLine("            if (" + IsCodeOr("card", avoidColumnCard) + " && card.Location == CardLocation.SpellZone && (card.Position & (int)CardPosition.FaceDown) != 0)");
                     sb.AppendLine("            {");
-                    sb.AppendLine("                _avoidColumn = card.Sequence;");
-                    sb.AppendLine("                _avoidTurn = Duel.Turn;");
+                    sb.AppendLine("                int avoidCol = AvoidColumnOf(card);");
+                    sb.AppendLine("                if (avoidCol >= 0) { _avoidColumn = avoidCol; _avoidTurn = Duel.Turn; }");
                     sb.AppendLine("            }");
                     sb.AppendLine("            // 이번 턴 무효 열에 있는 내 마함은 발동하지 않는다 (효과가 무효될 발동을 미리 막는다)");
                     sb.AppendLine("            if (_avoidTurn == Duel.Turn && _avoidColumn >= 0 && _avoidColumn < 5");
@@ -697,7 +708,7 @@ namespace WindBotAIEditor.Services
                     if (p.DebugEffectLog)
                     {
                         sb.AppendLine("            {");
-                        sb.AppendLine("                Console.WriteLine(\"[AI-EDITOR] avoid-column block col=\" + _avoidColumn.ToString() + \" card=\" + card.Id.ToString());");
+                        sb.AppendLine("                LogLine(\"[AI-EDITOR] avoid-column block col=\" + _avoidColumn.ToString() + \" card=\" + card.Id.ToString());");   // B-47
                         sb.AppendLine("                return false;");
                         sb.AppendLine("            }");
                     }
