@@ -354,6 +354,7 @@ namespace WindBotAIEditor
             _profile.SkipEffectImmuneNegate = ChkSkipEffectImmuneNegate.IsChecked == true;    // 2026-11-02
             _profile.NegateCardIds ??= new List<int>();
             _profile.SkipDestructImmuneDestroy = ChkSkipDestructImmuneDestroy.IsChecked == true;   // 2026-11-02
+            _profile.AndroidSafeCheck = ChkAndroidSafe.IsChecked == true;                            // 2026-11-02
             _profile.DestroyCardIds ??= new List<int>();
             _profile.EffectImmuneCards ??= new List<int>();
             _profile.FreePlaySetSpell = ChkFreePlaySetSpell.IsChecked == true;                     // B-15
@@ -396,6 +397,7 @@ namespace WindBotAIEditor
             if (CardNegate != null) CardNegate.CardId = 0;
             UpdateNegateText();
             if (ChkSkipDestructImmuneDestroy != null) ChkSkipDestructImmuneDestroy.IsChecked = p.SkipDestructImmuneDestroy;   // 2026-11-02
+            if (ChkAndroidSafe != null) ChkAndroidSafe.IsChecked = p.AndroidSafeCheck;                  // 2026-11-02
             p.DestroyCardIds ??= new List<int>();
             if (CardDestroy != null) CardDestroy.CardId = 0;
             UpdateDestroyCardText();
@@ -442,6 +444,9 @@ namespace WindBotAIEditor
             UpdateProfilePath();
             UpdatePreReleaseWarning();           // B-24: 프리릴리즈 경고(자동 변환 없음)
             RefreshEffectDescs(true);            // 2026-11-01: 규칙을 읽은 뒤 효과번호 후보(목록)를 채운다
+            // 2026-11-02 (A-6): 설정 배지(기본값/변경됨) + 우클릭 되돌리기 연결
+            HookSettingContextMenus();
+            UpdateSettingBadges();
             foreach (var c in _choices) c.ResetOptionChoices();   // 2026-11-01: 옵션desc 후보도 규칙 기준으로
         }
 
@@ -601,6 +606,16 @@ namespace WindBotAIEditor
             try { source = RuleCodeGen.Generate(p); }
             catch (Exception ex) { MessageBox.Show("소스 생성 실패: " + ex.Message); return; }
 
+            // 2026-11-02: 빌드 전 C#5 사전 검증 — 실패하면 DLL 을 건드리지 않는다
+            string preReport;
+            var preOk = PreBuildVerify(p, source, out preReport);
+            if (!preOk)
+            {
+                TxtBuildLog.Text = preReport + Environment.NewLine + Environment.NewLine + "FAILED (사전 검증)";
+                Status("사전 검증 실패 — build log 확인");
+                return;
+            }
+
             var res = PluginBuilder.BuildFromSource(_project, RuleCodeGen.ClassName(p.Engine), source);
 
             var note = "";
@@ -609,7 +624,8 @@ namespace WindBotAIEditor
             if (RuleCodeGen.Warnings.Count > 0)   // B-12: 별칭 8개 초과 / cdb 미로드
                 note += string.Join(Environment.NewLine, RuleCodeGen.Warnings.Select(w => "[별칭] " + w)) + Environment.NewLine + Environment.NewLine;
 
-            TxtBuildLog.Text = note + res.Log + Environment.NewLine + Environment.NewLine +
+            TxtBuildLog.Text = (string.IsNullOrWhiteSpace(preReport) ? "" : preReport + Environment.NewLine + Environment.NewLine)
+                               + note + res.Log + Environment.NewLine + Environment.NewLine +
                                (res.Ok ? "OK  → " + res.OutputPath : "FAILED");
 
             if (res.Ok)
@@ -2050,8 +2066,9 @@ namespace WindBotAIEditor
                 "BtnDestructCandAdd", "BtnDestructCandIgnore", "TxtDestructCand",
                 "CardEffectImmune", "TxtEffectImmune", "ChkSkipEffectImmune",
                 "CardNegate", "TxtNegate", "BtnNegateDefault", "ChkSkipEffectImmuneNegate",
-                "CardDestroy", "TxtDestroy", "BtnDestroyDefault", "ChkSkipDestructImmuneDestroy",
-                "BtnImportJson", "ChkImportApplyEngine",
+                "CardDestroy", "TxtDestroy", "BtnDestroyDefault", "ChkSkipDestructImmuneDestroy", "ChkAndroidSafe",
+                "BtnImportJson", "ChkImportApplyEngine", "BtnRawBody",
+                "TxtSettingsSearch", "TxtSettingsSearchInfo",
                 "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace", "ChkSkipResistantGlobal",
                 "ChkSkipDestructImmune",
                 "BtnPreReleaseConvert", "TxtPreReleaseWarn",
@@ -4328,6 +4345,10 @@ namespace WindBotAIEditor
         }
     }
 }
+
+
+
+
 
 
 

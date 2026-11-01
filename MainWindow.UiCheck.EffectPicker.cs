@@ -457,6 +457,222 @@ namespace WindBotAIEditor
                 System.Console.Error.WriteLine("b62 mergeProfile ok dup=skip order=OK global=keep");
             return problems;
         }
+
+        /// <summary>
+        /// 2026-11-02 (B-63): C#5 검증기 — 정상 코드는 OK, C#6+ 문법은 오류로 잡고, 안드로이드 금지 API 도 스캔.
+        /// </summary>
+        public List<string> VerifyCSharp5VerifierUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                // ① 금지 API 스캔 (프로젝트 없이 가능)
+                var hits = CSharp5Verifier.ScanForbiddenApis("File.AppendAllText(\"x\", \"y\");\nvar t = Path.GetTempPath();");
+                if (hits.Count < 2) problems.Add("b63: 금지 API 스캔이 동작하지 않습니다 (" + hits.Count + ")");
+                if (hits.Count > 0 && hits[0].Line <= 0) problems.Add("b63: 금지 API 줄 번호가 없습니다");
+                if (CSharp5Verifier.ScanForbiddenApis("Console.WriteLine(1);").Count != 0)
+                    problems.Add("b63: 정상 코드를 금지 API 로 오탐");
+                // LINQ 누락(Any) 도 잡아야 한다 — 안드로이드 트리밍 BCL
+                if (CSharp5Verifier.ScanForbiddenApis("if (Bot.Hand.Any(c => c.IsCode(1))) return true;").Count == 0)
+                    problems.Add("b63: LINQ .Any() 를 잡지 못함");
+                // 주석은 오탐하지 않아야 한다
+                if (CSharp5Verifier.ScanForbiddenApis("// File.AppendAllText 는 안드로이드에 없음").Count != 0)
+                    problems.Add("b63: 주석의 API 이름을 오탐");
+
+                // Android 안전 검사 토글
+                if (ChkAndroidSafe == null) problems.Add("b63: 체크박스(ChkAndroidSafe) 없음");
+                else if (ChkAndroidSafe.IsChecked != true) problems.Add("b63: Android 안전 검사 기본값이 OFF");
+
+                // ② 실제 컴파일 검증 (WindBot 프로젝트가 있을 때만)
+                var proj = _project;
+                if (proj == null)
+                {
+                    try
+                    {
+                        var r0 = App.EdoproRoot ?? "";
+                        if (!string.IsNullOrWhiteSpace(r0))
+                        {
+                            var wb = System.IO.Path.Combine(r0, "WindBot");
+                            if (System.IO.Directory.Exists(wb)) proj = new WindBotProject(wb);
+                        }
+                    }
+                    catch { }
+                }
+                if (proj == null || !System.IO.File.Exists(proj.ExecutorBaseDll))
+                {
+                    System.Console.Error.WriteLine("b63 csharp5 ok scan=OK compile=skip (WindBot 폴더 없음)");
+                    return problems;
+                }
+
+                var p = new AiProfile { Engine = "probeVerify", FreePlay = true };
+                var good = RuleCodeGen.Generate(p);
+                var okRes = CSharp5Verifier.Verify(proj, good, "probeVerifyExecutor");
+                if (!okRes.Ok)
+                    problems.Add("b63: 정상 생성 코드인데 검증 실패 — " + okRes.Summary + " " + string.Join(" | ", okRes.Items.ConvertAll(d => d.ToString()).ToArray()));
+
+                var bad = good.Replace("public Nekroz", "public X") // no-op guard
+                               .Replace("    public class probeVerifyExecutor : DefaultExecutor", "    public class probeVerifyExecutor : DefaultExecutor");
+                bad = bad.Replace("        public probeVerifyExecutor(", "        public int BadProp => 1;\n        public probeVerifyExecutor(");
+                var badRes = CSharp5Verifier.Verify(proj, bad, "probeVerifyExecuto");
+                if (badRes.Ok) problems.Add("b63: C#6 식 본문(=>)을 검증기가 통과시킴");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b63 csharp5 ok scan=OK compile=OK bad=detected");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b63: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// 2026-11-02 (B-65): 로그 진단 강화 — `hit rule=N`(C-1) + 후보 목록 `cards=[…]`(C-2).
+        /// debugEffectLog ON 일 때만 생성되고, OFF 면 0줄이어야 한다(회귀).
+        /// </summary>
+        public List<string> VerifyHitLogUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var on = new AiProfile { Engine = "probeHit", FreePlay = true, DebugEffectLog = true };
+                on.Choices.Add(new ChoiceRule { On = "SelectCard", Pick = "firstAvailable", Priority = 10 });
+                var srcOn = RuleCodeGen.Generate(on);
+                if (srcOn.IndexOf("LogHit(", StringComparison.Ordinal) < 0) problems.Add("b65: hit rule 로그(LogHit)가 없습니다");
+                if (srcOn.IndexOf("cards=[", StringComparison.Ordinal) < 0) problems.Add("b65: 후보 목록(cards=[) 로그가 없습니다");
+                if (srcOn.IndexOf("hit rule=", StringComparison.Ordinal) < 0) problems.Add("b65: 'hit rule=' 문구가 없습니다");
+
+                var off = new AiProfile { Engine = "probeHitOff", FreePlay = true, DebugEffectLog = false };
+                off.Choices.Add(new ChoiceRule { On = "SelectCard", Pick = "firstAvailable", Priority = 10 });
+                var srcOff = RuleCodeGen.Generate(off);
+                if (srcOff.IndexOf("LogHit(", StringComparison.Ordinal) >= 0) problems.Add("b65: 로그 OFF 인데 LogHit 생성됨");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b65 hitLog ok on=OK off=0");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b65: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// 2026-11-02 (B-66): ⚙ AI 설정 **검색 상자** — 입력 시 자동 펼침 + 매칭 행만 표시 + 지우면 복원.
+        /// 검사 후 반드시 원상 복구한다(접힘 상태·검색어 초기화).
+        /// </summary>
+        public List<string> VerifySettingsSearchUi()
+        {
+            var problems = new List<string>();
+            var oldCollapsed = PnlSettings.Visibility != Visibility.Visible;
+            try
+            {
+                if (TxtSettingsSearch == null) { problems.Add("b66: 검색 상자 없음"); return problems; }
+                if (TxtSettingsSearchInfo == null) problems.Add("b66: 결과 표시 없음");
+
+                var rows = SettingsRows();
+                if (rows.Count < 10) problems.Add("b66: 설정 행을 찾지 못했습니다 (" + rows.Count + ")");
+
+                TxtSettingsSearch.Text = "면역";
+                if (PnlSettings.Visibility != Visibility.Visible) problems.Add("b66: 검색해도 설정 카드가 펼쳐지지 않음");
+                var visible = 0;
+                foreach (var r in rows) if (r.Visibility == Visibility.Visible) visible++;
+                if (visible == 0) problems.Add("b66: '면역' 검색 결과가 0건");
+                if (rows.Count > 0 && visible >= rows.Count) problems.Add("b66: 검색했는데 모든 행이 보임(필터 미동작)");
+                if (TxtSettingsSearchInfo.Text.IndexOf("/", StringComparison.Ordinal) < 0)
+                    problems.Add("b66: 결과 수 표시가 없습니다 (" + TxtSettingsSearchInfo.Text + ")");
+
+                TxtSettingsSearch.Text = "";
+                var restored = 0;
+                foreach (var r in rows) if (r.Visibility == Visibility.Visible) restored++;
+                if (rows.Count > 0 && restored != rows.Count)
+                    problems.Add("b66: 검색어를 지웠는데 복원되지 않음 (" + restored + "/" + rows.Count + ")");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b66 settingsSearch ok rows=" + rows.Count + " filter=OK restore=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b66: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                try
+                {
+                    if (TxtSettingsSearch != null) TxtSettingsSearch.Text = "";
+                    SetSettingsCollapsed(oldCollapsed);
+                }
+                catch { }
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// 2026-11-02 (B-67): 설정 **기본값/변경됨 배지** — 값 변경 시 감지 + `@변경` 필터 + 되돌리기.
+        /// 검사 후 원래 값으로 복구한다.
+        /// </summary>
+        public List<string> VerifySettingBadgesUi()
+        {
+            var problems = new List<string>();
+            var oldCollapsed = PnlSettings.Visibility != Visibility.Visible;
+            var cb = FindNamed("ChkAndroidSafe") as CheckBox;
+            var oldValue = cb?.IsChecked;
+            try
+            {
+                if (cb == null) { problems.Add("b67: ChkAndroidSafe 를 찾지 못했습니다"); return problems; }
+
+                // 라이브 프로필은 이미 기본값과 다른 항목이 있을 수 있으므로 **기준선**을 잡고 증감만 검사한다
+                cb.IsChecked = true;
+                UpdateSettingBadges();
+                var baseline = _changedNames.Count;
+                if (_changedNames.Contains("ChkAndroidSafe"))
+                    problems.Add("b67: 기본(ON)인데 변경으로 표시됨");
+                var baselineRows = _changedRows.Count;
+
+                // 2) 하나 바꾸면 그 항목만 추가로 '변경'
+                cb.IsChecked = false;
+                UpdateSettingBadges();
+                if (!_changedNames.Contains("ChkAndroidSafe"))
+                    problems.Add("b67: Android 안전 검사 OFF 인데 변경 감지 안 됨");
+                if (_changedNames.Count != baseline + 1)
+                    problems.Add("b67: 변경 항목이 1개 늘지 않음 (" + baseline + " → " + _changedNames.Count + ")");
+                if (_changedRows.Count != baselineRows + 1)
+                    problems.Add("b67: 변경 행이 1개 늘지 않음 (" + baselineRows + " → " + _changedRows.Count + ")");
+                if (cb.FontWeight != System.Windows.FontWeights.Bold)
+                    problems.Add("b67: 변경된 행이 굵게 표시되지 않음");
+
+                // 3) @변경 필터 — 그 행이 포함되어야 한다
+                TxtSettingsSearch.Text = "@변경";
+                var shown = 0;
+                foreach (var r in SettingsRows()) if (r.Visibility == Visibility.Visible) shown++;
+                if (shown != _changedRows.Count)
+                    problems.Add("b67: '@변경' 필터 결과(" + shown + ")가 변경 행 수(" + _changedRows.Count + ")와 다름");
+
+                // 4) 되돌리기 → 기본값 복귀 + 변경 목록에서 제거
+                RevertSetting(SettingsMap().First(d => d.Name == "ChkAndroidSafe"));
+                if (cb.IsChecked != true) problems.Add("b67: 되돌리기 실패 (값이 기본으로 안 돌아감)");
+                if (_changedNames.Contains("ChkAndroidSafe")) problems.Add("b67: 되돌린 뒤에도 변경 항목이 남음");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b67 settingBadges ok baseline=" + baseline + " change=+1 filter=" + shown + " revert=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b67: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                try
+                {
+                    if (cb != null) cb.IsChecked = oldValue;
+                    if (TxtSettingsSearch != null) TxtSettingsSearch.Text = "";
+                    UpdateSettingBadges();
+                    SetSettingsCollapsed(oldCollapsed);
+                }
+                catch { }
+            }
+            return problems;
+        }
     }
 }
 

@@ -484,6 +484,13 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("            return n;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
+                // 2026-11-02 (C-1): 어느 규칙이 매칭됐는지 1줄 — 진단 시간 단축
+                sb.AppendLine("        // 2026-11-02: 규칙 매칭 로그 (rule = 그 콜백의 규칙 순번, 0 = 폴백)");
+                sb.AppendLine("        private static void LogHit(int rule, string pick, int whenCard)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            LogLine(\"[AI-EDITOR] hit rule=\" + rule.ToString() + \" pick=\" + pick + (whenCard > 0 ? \" whenCard=\" + whenCard.ToString() : \"\"));");
+                sb.AppendLine("        }");
+                sb.AppendLine();
                 sb.AppendLine("        // B-27: SelectCard 결과 로그 (누가/몇 장/힌트/무엇을 골랐는지)");
                 sb.AppendLine("        private void LogSelectCard(IList<ClientCard> cards, int min, int max, long hint, IList<ClientCard> picked)");
                 sb.AppendLine("        {");
@@ -496,6 +503,14 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                    ids += (picked[i] == null ? \"null\" : picked[i].Id.ToString());");
                 sb.AppendLine("                }");
                 sb.AppendLine("            }");
+                // 2026-11-02 (C-2): 후보 목록을 로그에 남긴다 — "n=2 중 뭐가 있었나"를 바로 확인
+                sb.AppendLine("            string cids = \"\";");
+                sb.AppendLine("            if (cards != null)");
+                sb.AppendLine("                for (int ci2 = 0; ci2 < cards.Count && ci2 < 10; ci2++)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    if (ci2 > 0) cids += \",\";");
+                sb.AppendLine("                    cids += (cards[ci2] == null ? \"null\" : cards[ci2].Id.ToString());");
+                sb.AppendLine("                }");
                 sb.AppendLine("            int disN = 0;   // 2026-10-30: 후보 중 효과 무효 카드 수");
                 sb.AppendLine("            if (cards != null)");
                 sb.AppendLine("                for (int i = 0; i < cards.Count; i++)");
@@ -513,7 +528,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                }");
             sb.AppendLine("            }");
             sb.AppendLine("            LogLine(\"[AI-EDITOR] select card=\" + (Card != null ? Card.Id.ToString() : \"-\")");
-            sb.AppendLine("                + \" min=\" + min.ToString() + \" max=\" + max.ToString() + \" hint=\" + hint.ToString() + \" n=\" + (cards != null ? cards.Count : 0) + \" dis=\" + disN.ToString() + \" fdis=\" + fdis.ToString()");
+            sb.AppendLine("                + \" min=\" + min.ToString() + \" max=\" + max.ToString() + \" hint=\" + hint.ToString() + \" n=\" + (cards != null ? cards.Count : 0) + \" cards=[\" + cids + \"] dis=\" + disN.ToString() + \" fdis=\" + fdis.ToString()");
             sb.AppendLine("                + \" chain=[\" + chainStr + \"]\"   // B-34: 체인 목록");
             sb.AppendLine("                + \" -> \" + ids + StateStr());   // 2026-10-30: 상태(턴/페이즈/체인)");
                 sb.AppendLine("        }");
@@ -1235,12 +1250,20 @@ namespace WindBotAIEditor.Services
                         : (c.Pick == "chainCard" ? chainCall : $"Pick({ruleSrc}, {sig.MaxExpr}, {PolicyId(c.Pick)}, {c.Card})");
                     if (parts.Count == 0)
                     {
-                        sb.AppendLine($"            return {call};");
+                        if (p.DebugEffectLog && isSelectCard)
+                            sb.AppendLine($"            {{ LogHit({rulesForCb.IndexOf(c) + 1}, \"{c.Pick}\", {c.WhenCard}); return {call}; }}");
+                        else
+                            sb.AppendLine($"            return {call};");
                         decidedElsewhere = true;
                         break;
                     }
                     var guard = parts.Count == 1 ? parts[0] : "(" + string.Join(" && ", parts) + ")";
-                    sb.AppendLine($"            if ({guard}) return {call};");
+                    // 2026-11-02 (C-1): 어느 규칙이 이겼는지 로그 (SelectCard 한정, debugEffectLog ON 일 때만)
+                    var ruleNo = rulesForCb.IndexOf(c) + 1;
+                    if (p.DebugEffectLog && isSelectCard)
+                        sb.AppendLine($"            if ({guard}) {{ LogHit({ruleNo}, \"{c.Pick}\", {c.WhenCard}); return {call}; }}");
+                    else
+                        sb.AppendLine($"            if ({guard}) return {call};");
                     emitted++;
                 }
 
@@ -1251,6 +1274,8 @@ namespace WindBotAIEditor.Services
                         // B-35: 공격 대상 선택(hint=549)은 규칙이 없으면 "이길 수 있는 가장 약한 상대"를 고른다
                         if (isSelectCard)
                             sb.AppendLine("            if (hint == HintMsg.AttackTarget) return PickAttackTarget(" + srcList + ");   // B-35: 공격 대상 기본 정책");
+                        if (p.DebugEffectLog && isSelectCard)
+                            sb.AppendLine("            LogHit(0, \"fallback\", 0);   // 2026-11-02 (C-1): 규칙 미매칭 → 기본 폴백");
                         sb.AppendLine($"            return Pick({srcList}, {sig.MaxExpr}, 0, 0);   // 남은 규칙 없음 → 목록 순서");
                     }
                     else if (needFilter)

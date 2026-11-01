@@ -1020,6 +1020,12 @@ namespace WindBotAIEditor.Models
         /// </summary>
         public List<int> NegateCardIds { get; set; } = new List<int>();
 
+        /// <summary>
+        /// 2026-11-02: **Android 안전 검사** — 생성 코드가 안드로이드 트리밍 BCL 에 없는 API 를 쓰면 빌드를 막는다(기본 ON).
+        /// Windows/Android **둘 다** 같은 DLL 로 돌아가야 하므로 기본값을 켜 둔다.
+        /// </summary>
+        public bool AndroidSafeCheck { get; set; } = true;
+
         /// <summary>2026-11-02: 무효화 카드가 효과 면역 카드의 효과에 체인하는 것을 막을지 (전역, 기본 ON)</summary>
         public bool SkipEffectImmuneNegate { get; set; } = true;
 

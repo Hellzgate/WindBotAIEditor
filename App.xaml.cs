@@ -49,6 +49,14 @@ public partial class App : Application
             return;
         }
 
+        // 2026-11-02: C#5 검증만: --check <rules.json> [EDOPro폴더]
+        if (e.Args.Length >= 2 && e.Args[0] == "--check")
+        {
+            int code = RunCheck(e.Args);
+            Shutdown(code);
+            return;
+        }
+
         // 2026-11-02: 실행기(.cs) → 우리 규칙 JSON 스캐폴드: --scaffold <executor.cs> [out.json] [_CardId소스]
         if (e.Args.Length >= 2 && e.Args[0] == "--scaffold")
         {
@@ -259,6 +267,30 @@ public partial class App : Application
             // 2026-11-02 (B-62): 다른 JSON 추가(병합) — 중복 건너뜀 · 우선순위 이어붙임 · 전역 유지
             total = problems.Count;
             problems.AddRange(w.VerifyMergeProfileUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-63): C#5 검증기(생성 코드 csc 컴파일 + 안드로이드 금지 API)
+            total = problems.Count;
+            problems.AddRange(w.VerifyCSharp5VerifierUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-65): 로그 진단 강화 — hit rule=N + 후보 목록
+            total = problems.Count;
+            problems.AddRange(w.VerifyHitLogUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-66): ⚙ AI 설정 검색 상자
+            total = problems.Count;
+            problems.AddRange(w.VerifySettingsSearchUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-67): 설정 기본값/변경됨 배지 + @변경 필터 + 되돌리기
+            total = problems.Count;
+            problems.AddRange(w.VerifySettingBadgesUi());
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             total = problems.Count;
@@ -774,6 +806,55 @@ public partial class App : Application
         var t = s.Replace("\r", " ").Replace("\n", " ");
         while (t.IndexOf("  ", StringComparison.Ordinal) >= 0) t = t.Replace("  ", " ");
         return t.Trim();
+    }
+
+    /// <summary>
+    /// 2026-11-02: `--check &lt;rules.json&gt; [EDOPro폴더]` — 생성 코드를 **csc v4.0 으로 컴파일 검증만** 한다(파일 쓰기 없음).
+    /// </summary>
+    private static int RunCheck(string[] args)
+    {
+        try
+        {
+            var path = Path.GetFullPath(args[1]);
+            if (!File.Exists(path)) { Console.Error.WriteLine("파일 없음: " + path); return 2; }
+
+            var root = args.Length >= 3 ? Path.GetFullPath(args[2]) : (AppSettings.Load().EdoproPath ?? "");
+            var windbot = Path.Combine(root, "WindBot");
+            if (!Directory.Exists(windbot)) { Console.Error.WriteLine("WindBot 폴더 없음: " + windbot); return 2; }
+            var project = new WindBotProject(windbot);
+
+            var p = JsonSerializer.Deserialize<AiProfile>(File.ReadAllText(path), WindBotProject.JsonOpts);
+            if (p == null) { Console.Error.WriteLine("규칙 JSON 형식이 아닙니다"); return 2; }
+            RuleMigration.Normalize(p);
+
+            try
+            {
+                var cands = CardDatabase.FindCandidates(windbot);
+                if (cands.Count > 0) CardDatabase.Instance.OpenMany(cands);
+            }
+            catch { }
+
+            var cls = RuleCodeGen.ClassName(p.Engine);
+            var src = RuleCodeGen.Generate(p);
+            Console.WriteLine("engine=" + p.Engine + " cls=" + cls + " lines=" + src.Split('\n').Length +
+                              " actions=" + p.Actions.Count + " choices=" + p.Choices.Count + " forbids=" + p.Forbids.Count);
+
+            var r = CSharp5Verifier.Verify(project, src, cls);
+            foreach (var d in r.Items) Console.Error.WriteLine("  " + d);
+            var warn = CSharp5Verifier.ScanForbiddenApis(src);
+            foreach (var w in warn) Console.WriteLine("  [android] " + w);
+            var allowUnsafe = Array.IndexOf(args, "--allow-android-unsafe") >= 0;
+            var androidOk = warn.Count == 0 || !p.AndroidSafeCheck || allowUnsafe;
+            if (!androidOk) Console.Error.WriteLine("  → 안드로이드에서 죽는 API 입니다(게이트). --allow-android-unsafe 로 무시할 수 있습니다.");
+            Console.WriteLine(r.Ok ? "CHECK OK (C#5)" : ("CHECK FAIL " + r.Items.Count));
+            if (!r.Ok) return 3;
+            return androidOk ? 0 : 4;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("CHECK ERROR " + ex.GetType().Name + ": " + ex.Message);
+            return 9;
+        }
     }
 
     /// <summary>
