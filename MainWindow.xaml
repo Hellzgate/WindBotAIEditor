@@ -1892,6 +1892,13 @@
                         <WrapPanel>
                             <Button Content="규칙 저장 (JSON)" Click="OnSaveProfile" FontWeight="SemiBold"/>
                             <Button Content="규칙 불러오기" Margin="6,0,0,0" Click="OnLoadProfile"/>
+                            <!-- 2026-11-02: 임의의 규칙 JSON 불러오기 (템플릿 재사용: 패트랩·전역 설정) -->
+                            <Button x:Name="BtnImportJson" Content="다른 JSON…" Margin="6,0,0,0" Click="OnImportOtherJson"
+                                    ToolTip="다른 규칙 JSON 을 골라 **현재 엔진에** 불러옵니다 — 패트랩 금지/선택 규칙·전역 설정을 템플릿처럼 재사용할 때. [규칙 저장] 을 눌러야 파일에 반영됩니다"/>
+                            <CheckBox x:Name="ChkImportApplyEngine" VerticalAlignment="Center" Margin="8,0,0,0"
+                                      ToolTip="체크하면 파일에 들어 있는 **엔진명**도 함께 적용합니다(다른 덱으로 전환). 기본은 현재 엔진 유지 = 규칙/설정만 가져오기"/>
+                            <TextBlock Text="파일의 엔진명도 적용" VerticalAlignment="Center" Margin="4,0,0,0" FontSize="11"
+                                       Foreground="{DynamicResource HintFg}"/>
                             <Button Content="소스 미리보기" Margin="10,0,0,0" Click="OnPreviewSource"/>
                             <Button Content="생성 + 컴파일" Margin="6,0,0,0" Click="OnBuildEngine" FontWeight="Bold" Background="{DynamicResource AccentBg}" Foreground="{DynamicResource AccentFg}"/>
                             <!-- B-24: 프리릴리즈 → 정규 카드 ID 변환 (미리보기 → 적용, .bak 자동 백업) -->

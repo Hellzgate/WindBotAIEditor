@@ -194,6 +194,18 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("using WindBot.Game;");
             sb.AppendLine("using WindBot.Game.AI;");
             sb.AppendLine("using YGOSharp.OCGWrapper.Enums;");
+            // 2026-11-02: 포팅 스캐폴드 — 원본 실행기의 추가 using
+            if (p.RawUsings != null)
+            {
+                foreach (var u in p.RawUsings)
+                {
+                    var line = (u ?? "").Trim();
+                    if (line.Length == 0) continue;
+                    if (!line.StartsWith("using ", StringComparison.Ordinal)) line = "using " + line;
+                    if (!line.EndsWith(";", StringComparison.Ordinal)) line += ";";
+                    sb.AppendLine(line);
+                }
+            }
             if (!string.IsNullOrWhiteSpace(p.DialogFile))
             {
                 sb.AppendLine("using System.IO;");
@@ -207,6 +219,14 @@ namespace WindBotAIEditor.Services
             sb.AppendLine($"    [Deck(\"{p.Engine}\", \"AI_{p.Engine}\", \"Normal\")]");
             sb.AppendLine("    public class " + cls + " : DefaultExecutor");
             sb.AppendLine("    {");
+            // 2026-11-02: 포팅 스캐폴드 — 원본 실행기의 나머지 멤버(CardId/필드/헬퍼)를 그대로 넣는다
+            if (!string.IsNullOrWhiteSpace(p.RawMembers))
+            {
+                sb.AppendLine("        // ---- 포팅 원본 멤버 (" + (string.IsNullOrWhiteSpace(p.ScaffoldSource) ? "scaffold" : System.IO.Path.GetFileName(p.ScaffoldSource)) + ") ----");
+                foreach (var ln in p.RawMembers.Replace("\r\n", "\n").Split('\n'))
+                    sb.AppendLine("        " + ln.TrimEnd());
+                sb.AppendLine();
+            }
             sb.AppendLine("        public " + cls + "(GameAI ai, Duel duel) : base(ai, duel)");
             sb.AppendLine("        {");
             if (!string.IsNullOrWhiteSpace(p.DialogFile))
@@ -3598,6 +3618,26 @@ namespace WindBotAIEditor.Services
             bool hasCond = a.Conditions.Count > 0;
             bool needGuard = guardEffect && string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase);
             bool hasDesc = string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase) && a.EffectDesc >= 0;   // B-45
+
+            // 2026-11-02: 포팅 스캐폴드 — 원본 handler 본문이 있으면 블록 람다로 감싸서 방출
+            if (!string.IsNullOrWhiteSpace(a.RawBody))
+            {
+                var gate = hasCond ? ConditionExpression(a.Conditions) : "";
+                if (hasDesc)
+                    gate = (gate.Length > 0 ? "(ActivateDescription == " + a.EffectDesc + ") && (" + gate + ")" : "ActivateDescription == " + a.EffectDesc);
+                if (needGuard)
+                    gate = gate.Length > 0 ? "!IsForbiddenEffect(Card, ActivateDescription) && (" + gate + ")" : "!IsForbiddenEffect(Card, ActivateDescription)";
+
+                var sbRaw = new StringBuilder();
+                sbRaw.Append("AddExecutor(ExecutorType.").Append(a.Type);
+                if (card > 0) sbRaw.Append(", ").Append(card);
+                sbRaw.Append(", () =>\n{\n");
+                if (gate.Length > 0) sbRaw.Append("    if (!(").Append(gate).Append(")) return false;\n");
+                foreach (var ln in a.RawBody.Replace("\r\n", "\n").Split('\n'))
+                    sbRaw.Append("    ").Append(ln.TrimEnd()).Append('\n');
+                sbRaw.Append("})");
+                return sbRaw.ToString();
+            }
 
             if (!hasCond && !stopWhenComplete && !needGuard && !hasDesc)
             {

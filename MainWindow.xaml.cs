@@ -496,6 +496,75 @@ namespace WindBotAIEditor
             TryLoadProfile((TxtEngineName.Text ?? "").Trim());
         }
 
+        /// <summary>
+        /// 2026-11-02: **임의의 규칙 JSON 불러오기** — 템플릿 재사용(패트랩 금지/선택 규칙·전역 설정).
+        /// 기본은 **현재 엔진 유지**(규칙/설정만 교체). `파일의 엔진명도 적용` 체크 시 엔진명까지 바꾼다.
+        /// 파일에 쓰지 않는다 — [규칙 저장] 을 눌러야 반영된다.
+        /// </summary>
+        private void OnImportOtherJson(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_project == null) { Status("EDOPro 폴더를 먼저 여세요"); return; }
+
+                var dlg = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "다른 규칙 JSON 불러오기",
+                    Filter = "규칙 JSON (*.json)|*.json|모든 파일 (*.*)|*.*"
+                };
+                try
+                {
+                    var dir = Path.GetDirectoryName(ProfilePath);
+                    if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)) dlg.InitialDirectory = dir;
+                }
+                catch { }
+                if (dlg.ShowDialog() != true) return;
+
+                var text = File.ReadAllText(dlg.FileName);
+                var p = JsonSerializer.Deserialize<AiProfile>(text, WindBotProject.JsonOpts);
+                if (p == null) { Status("불러오기 실패: 규칙 JSON 형식이 아닙니다"); return; }
+                RuleMigration.Normalize(p);
+
+                // 2026-11-02: 덮어쓰기 / 추가(병합) 선택
+                var info = Path.GetFileName(dlg.FileName) + "  —  행동 " + (p.Actions?.Count ?? 0) +
+                           " / 선택 " + (p.Choices?.Count ?? 0) + " / 금지 " + (p.Forbids?.Count ?? 0) +
+                           (string.IsNullOrWhiteSpace(p.Engine) ? "" : "  ·  엔진 " + p.Engine);
+                var dlgMode = new ImportModeWindow(info) { Owner = this };
+                if (dlgMode.ShowDialog() != true) { Status("다른 JSON 불러오기 취소"); return; }
+
+                if (dlgMode.Mode == ImportModeWindow.ImportMode.Merge)
+                {
+                    if (_profile == null) { Status("먼저 [규칙 불러오기] 로 현재 프로필을 준비하세요"); return; }
+                    var counts = ProfileMerger.MergeInto(_profile, p);
+                    ApplyProfile(_profile);   // 병합 결과를 화면에 반영
+                    UpdateRuleSummary();
+                    Status("다른 JSON 추가(병합): " + counts.Summary + " · 전역 설정 유지 · [규칙 저장] 으로 반영");
+                    return;
+                }
+
+                var fileEngine2 = p.Engine ?? "";
+                var applyEngine2 = ChkImportApplyEngine.IsChecked == true;
+                if (!applyEngine2)
+                {
+                    var cur2 = (TxtEngineName.Text ?? "").Trim();
+                    p.Engine = string.IsNullOrWhiteSpace(cur2) ? fileEngine2 : cur2;
+                }
+
+                ApplyProfile(p);
+                UpdateRuleSummary();
+
+                var counts2 = "행동 " + _actions.Count + " / 선택 " + _choices.Count + " / 금지 " + _forbids.Count +
+                              " / 루트 " + RouteSetCount(false) + "벌";
+                Status("다른 JSON 덮어쓰기: " + Path.GetFileName(dlg.FileName) + " — " + counts2 +
+                       (applyEngine2 ? " · 엔진 적용(" + p.Engine + ")" : " · 엔진 유지(" + p.Engine + ")") +
+                       " · [규칙 저장] 으로 반영");
+            }
+            catch (Exception ex)
+            {
+                Status("다른 JSON 불러오기 실패: " + ex.Message);
+            }
+        }
+
         private void OnPreviewSource(object sender, RoutedEventArgs e)
         {
             CommitGrids();
@@ -1982,6 +2051,7 @@ namespace WindBotAIEditor
                 "CardEffectImmune", "TxtEffectImmune", "ChkSkipEffectImmune",
                 "CardNegate", "TxtNegate", "BtnNegateDefault", "ChkSkipEffectImmuneNegate",
                 "CardDestroy", "TxtDestroy", "BtnDestroyDefault", "ChkSkipDestructImmuneDestroy",
+                "BtnImportJson", "ChkImportApplyEngine",
                 "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace", "ChkSkipResistantGlobal",
                 "ChkSkipDestructImmune",
                 "BtnPreReleaseConvert", "TxtPreReleaseWarn",
@@ -2713,7 +2783,14 @@ namespace WindBotAIEditor
                 for (var i = 0; i < kinds.Length; i++)
                 {
                     CmbFreePlaySetKind.SelectedValue = kinds[i];
-                    var src = RuleCodeGen.Generate(CurrentProfile());
+                    // 2026-11-02: 생성 검사는 **최소 프로브**로 — 불러온 프로필에 SpellSet 행이 있어도 오탐하지 않게
+                    var probe = new AiProfile
+                    {
+                        Engine = "probeB15", FreePlay = true, FreePlaySetSpell = true,
+                        FreePlaySetSpellKind = kinds[i],
+                        FreePlaySetSpellExclude = new List<int> { 59438930 }
+                    };
+                    var src = RuleCodeGen.Generate(probe);
                     var ok = src.IndexOf("AddExecutor(ExecutorType.SpellSet", StringComparison.Ordinal) >= 0
                              && src.IndexOf("Card.Data != null", StringComparison.Ordinal) >= 0
                              && src.IndexOf(expect[i], StringComparison.Ordinal) >= 0
@@ -2724,10 +2801,11 @@ namespace WindBotAIEditor
                 if (RuleCodeGen.Generate(CurrentProfile()).IndexOf("Card.IsCode(14558127)", StringComparison.Ordinal) >= 0)
                     problems.Add("B-15: 비운 제외 카드가 생성 코드에 남음");
 
-                // 5) 옵션 OFF → SpellSet 미생성 (회귀)
+                // 5) 옵션 OFF → SpellSet 미생성 (회귀) — 프로브로 검사(불러온 프로필의 SpellSet 행과 무관)
                 ChkFreePlaySetSpell.IsChecked = false;
                 UpdateFreePlaySetSpellUi();
-                var offOk = RuleCodeGen.Generate(CurrentProfile())
+                var offProbe = new AiProfile { Engine = "probeB15off", FreePlay = true, FreePlaySetSpell = false };
+                var offOk = RuleCodeGen.Generate(offProbe)
                     .IndexOf("ExecutorType.SpellSet", StringComparison.Ordinal) < 0;
                 if (!offOk) problems.Add("B-15: 옵션 OFF 인데 SpellSet 이 생성됨");
 
@@ -4250,6 +4328,7 @@ namespace WindBotAIEditor
         }
     }
 }
+
 
 
 

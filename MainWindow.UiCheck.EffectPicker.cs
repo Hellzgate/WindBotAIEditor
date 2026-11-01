@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using WindBotAIEditor.Models;
@@ -366,5 +368,95 @@ namespace WindBotAIEditor
                 System.Console.Error.WriteLine("b59 destroyCard ok chk=ON gen=OK empty=0 off=0 lines=" + srcOn.Split('\n').Length);
             return problems;
         }
+
+        /// <summary>
+        /// 2026-11-02 (B-61): **다른 규칙 JSON 불러오기** — 컨트롤 존재 + 템플릿 로드(다른 엔진) 검증.
+        /// </summary>
+        public List<string> VerifyImportJsonUi()
+        {
+            var problems = new List<string>();
+            if (BtnImportJson == null) problems.Add("b61: 버튼(BtnImportJson) 없음");
+            if (ChkImportApplyEngine == null) problems.Add("b61: 체크박스(ChkImportApplyEngine) 없음");
+            if (ChkImportApplyEngine != null && ChkImportApplyEngine.IsChecked == true)
+                problems.Add("b61: 기본값이 '엔진명 적용' — 기본은 유지여야 합니다");
+
+            string tmp = null;
+            var saved = _profile;   // 2026-11-02: 검사 후 복원용
+            try
+            {
+                var p = new AiProfile { Engine = "probeImportSrc", Description = "template" };
+                p.Actions.Add(new ActionRule { Type = "Activate", Card = 59438930, Priority = 0 });
+                p.Forbids.Add(new ForbidRule { Card = 97268402, Action = "Activate", Priority = 5 });
+                p.SkipResistantGlobal = false;
+                tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wbimport-probe.json");
+                File.WriteAllText(tmp, JsonSerializer.Serialize(p, WindBotProject.JsonOpts), new System.Text.UTF8Encoding(false));
+
+                if (!LoadProfileFile(tmp)) { problems.Add("b61: 템플릿 JSON 로드 실패"); return problems; }
+                if (_actions.Count != 1 || _forbids.Count != 1) problems.Add("b61: 로드 후 규칙 수가 다릅니다 (행동 " + _actions.Count + "/금지 " + _forbids.Count + ")");
+                if (_profile == null || _profile.SkipResistantGlobal) problems.Add("b61: 전역 설정이 반영되지 않았습니다");
+                // 2026-11-02: 검사 후 **원래 프로필 복원** — --uicheck 의 최종 요약이 오염되지 않게
+                if (saved != null) { try { ApplyProfile(saved); } catch { } }
+            }
+            catch (Exception ex)
+            {
+                problems.Add("b61: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                try { if (tmp != null && File.Exists(tmp)) File.Delete(tmp); } catch { }
+            }
+
+            if (problems.Count == 0)
+                System.Console.Error.WriteLine("b61 importJson ok btn=OK chkDefault=OK load=OK");
+            return problems;
+        }
+
+        /// <summary>
+        /// 2026-11-02 (B-62): 다른 JSON **추가(병합)** — 중복 건너뜀 · 우선순위 이어붙임 · 전역 설정 유지.
+        /// </summary>
+        public List<string> VerifyMergeProfileUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var target = new AiProfile { Engine = "mergeTarget", SkipResistantGlobal = false, SkipDestructImmuneOnDestroy = false };
+                target.Actions.Add(new ActionRule { Type = "Activate", Card = 59438930, Priority = 10 });
+                target.Forbids.Add(new ForbidRule { Card = 97268402, Action = "Activate", Priority = 10 });
+
+                var src = new AiProfile { Engine = "mergeSrc", SkipResistantGlobal = true, SkipDestructImmuneOnDestroy = true };
+                src.Actions.Add(new ActionRule { Type = "Activate", Card = 59438930, Priority = 10 });   // 중복
+                src.Actions.Add(new ActionRule { Type = "SpSummon", Card = 100458018, Priority = 20 });  // 신규
+                src.Choices.Add(new ChoiceRule { On = "SelectCard", Pick = "firstAvailable", WhenCard = 0, Priority = 5 });
+                src.Forbids.Add(new ForbidRule { Card = 97268402, Action = "Activate", Priority = 20 }); // 중복
+
+                var c = ProfileMerger.MergeInto(target, src);
+                if (c.Actions != 1) problems.Add("b62: 추가된 행동 수 " + c.Actions + " (1 기대)");
+                if (c.Choices != 1) problems.Add("b62: 추가된 선택 규칙 수 " + c.Choices + " (1 기대)");
+                if (c.Forbids != 0) problems.Add("b62: 중복 금지가 추가됨 (" + c.Forbids + ")");
+                if (c.Skipped != 2) problems.Add("b62: 건너뛴 중복 " + c.Skipped + " (2 기대)");
+                if (target.Actions.Count != 2) problems.Add("b62: 병합 후 행동 " + target.Actions.Count + " (2 기대)");
+
+                var added = target.Actions.FirstOrDefault(x => x.Card == 100458018);
+                if (added == null) problems.Add("b62: 신규 행동이 없습니다");
+                else if (added.Priority <= 10) problems.Add("b62: 병합 행동 우선순위 " + added.Priority + " (기존 10 보다 커야 함)");
+
+                if (target.SkipResistantGlobal) problems.Add("b62: 병합이 전역 설정을 덮어씀(내성)");
+                if (target.SkipDestructImmuneOnDestroy) problems.Add("b62: 병합이 전역 설정을 덮어씀(파괴내성)");
+
+                // 선택 창이 정상 생성되는지(표시하지 않음) — 버튼/기본값
+                var dlg = new ImportModeWindow("probe");
+                if (dlg.Mode != ImportModeWindow.ImportMode.Cancel) problems.Add("b62: 선택 창 기본 모드가 취소가 아님");
+                if (dlg.BtnReplace == null || dlg.BtnMerge == null) problems.Add("b62: 선택 창 버튼 누락");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b62: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            if (problems.Count == 0)
+                System.Console.Error.WriteLine("b62 mergeProfile ok dup=skip order=OK global=keep");
+            return problems;
+        }
     }
 }
+

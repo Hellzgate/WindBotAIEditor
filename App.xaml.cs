@@ -49,6 +49,14 @@ public partial class App : Application
             return;
         }
 
+        // 2026-11-02: 실행기(.cs) → 우리 규칙 JSON 스캐폴드: --scaffold <executor.cs> [out.json] [_CardId소스]
+        if (e.Args.Length >= 2 && e.Args[0] == "--scaffold")
+        {
+            int code = RunScaffold(e.Args);
+            Shutdown(code);
+            return;
+        }
+
         // 카드 DB 확인: WindBotAIEditor.exe --dbinfo <cards.cdb>
         if (e.Args.Length >= 2 && e.Args[0] == "--dbinfo")
         {
@@ -239,6 +247,18 @@ public partial class App : Application
             // 2026-11-02 (B-59): 파괴 카드 목록 + 파괴 내성 카드 체인 금지(발동 차단)
             total = problems.Count;
             problems.AddRange(w.VerifyDestroyCardUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-61): 다른 규칙 JSON 불러오기(템플릿 재사용)
+            total = problems.Count;
+            problems.AddRange(w.VerifyImportJsonUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-62): 다른 JSON 추가(병합) — 중복 건너뜀 · 우선순위 이어붙임 · 전역 유지
+            total = problems.Count;
+            problems.AddRange(w.VerifyMergeProfileUi());
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             total = problems.Count;
@@ -754,6 +774,41 @@ public partial class App : Application
         var t = s.Replace("\r", " ").Replace("\n", " ");
         while (t.IndexOf("  ", StringComparison.Ordinal) >= 0) t = t.Replace("  ", " ");
         return t.Trim();
+    }
+
+    /// <summary>
+    /// 2026-11-02: `--scaffold &lt;executor.cs&gt; [out.json] [전역CardId소스]`
+    /// WindBot 실행기를 우리 규칙 JSON 으로 변환한다(AddExecutor → 행동, 커스텀 handler → RawBody, 나머지 → RawMembers).
+    /// </summary>
+    private static int RunScaffold(string[] args)
+    {
+        try
+        {
+            var src = Path.GetFullPath(args[1]);
+            if (!File.Exists(src)) { Console.Error.WriteLine("파일 없음: " + src); return 2; }
+            var outPath = args.Length >= 3 ? Path.GetFullPath(args[2]) : Path.ChangeExtension(src, ".rules.json");
+            var gids = args.Length >= 4 ? args[3] : @"D:\rea-out\gh\IceYGO__windbot\Game\AI\DefaultExecutor.cs";
+
+            var r = ExecutorScaffolder.Scaffold(src, gids);
+            foreach (var line in r.Log) Console.WriteLine("  " + line);
+            if (!r.Ok || r.Profile == null) { Console.Error.WriteLine("SCAFFOLD FAIL"); return 3; }
+
+            var json = JsonSerializer.Serialize(r.Profile, WindBotProject.JsonOpts);
+            File.WriteAllText(outPath, json, new System.Text.UTF8Encoding(false));
+            Console.WriteLine("OK " + outPath);
+
+            var csOut = Path.ChangeExtension(outPath, ".cs");
+            var code = RuleCodeGen.Generate(r.Profile);
+            File.WriteAllText(csOut, code, new System.Text.UTF8Encoding(false));
+            foreach (var w in RuleCodeGen.Warnings) Console.WriteLine("  warn: " + w);
+            Console.WriteLine("GEN " + csOut + "  (" + code.Split('\n').Length + "줄)");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("SCAFFOLD ERROR " + ex.GetType().Name + ": " + ex.Message);
+            return 9;
+        }
     }
 
     private static int RunDbInfo(string path)

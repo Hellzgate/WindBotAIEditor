@@ -70,6 +70,13 @@ namespace WindBotAIEditor.Models
         /// <summary>B-45: 효과번호(ActivateDescription) 필터 — -1 = 무관. Activate 행에서만 사용</summary>
         public long EffectDesc { get; set; } = -1;
 
+        /// <summary>
+        /// 2026-11-02: **포팅 원본 handler 본문**(C#). 값이 있으면 생성 코드가
+        /// `AddExecutor(type, card, () =&gt; { if (!(조건)) return false; &lt;본문&gt; })` 로 방출한다.
+        /// 조건은 UI에서 편집하고, 본문은 원본 동작을 그대로 보존한다(포팅 스캐폴드 전용).
+        /// </summary>
+        public string RawBody { get; set; } = "";
+
         /// <summary>그리드 편집용 문자열 (−1/빈칸 = 무관)</summary>
         [JsonIgnore]
         public string EffectDescText
@@ -857,6 +864,18 @@ namespace WindBotAIEditor.Models
         public string Engine { get; set; } = "MyDeck";
         public string Description { get; set; } = "";
         public int SchemaVersion { get; set; } = 13;
+
+        /// <summary>2026-11-02: 포팅 스캐폴드 원본 경로(참고용)</summary>
+        public string ScaffoldSource { get; set; } = "";
+
+        /// <summary>2026-11-02: 원본 실행기의 추가 using (예: System.Linq)</summary>
+        public List<string> RawUsings { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 2026-11-02: 클래스 본문에 **그대로** 넣을 멤버 텍스트 — `CardId` 상수 클래스, 상태 필드, 헬퍼 메서드, override 등.
+        /// 포팅 스캐폴드에서 원본 실행기의 나머지 부분을 보존한다(RawBody 가 참조하는 심볼들).
+        /// </summary>
+        public string RawMembers { get; set; } = "";
         public List<ActionRule> Actions { get; set; } = new List<ActionRule>();
         public List<ChoiceRule> Choices { get; set; } = new List<ChoiceRule>();
         public List<ForbidRule> Forbids { get; set; } = new List<ForbidRule>();
