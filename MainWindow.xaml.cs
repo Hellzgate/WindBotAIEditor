@@ -17,6 +17,47 @@ using Condition = WindBotAIEditor.Models.Condition;
 
 namespace WindBotAIEditor
 {
+    /// <summary>
+    /// 2026-11-01: 조건 "그룹" 배지 색 — 같은 그룹 번호는 같은 색(괄호로 묶인다는 표시).
+    /// 0(기본)은 회색. 테마와 무관하게 고정 팔레트를 쓴다(그룹 구분이 목적이므로).
+    /// </summary>
+    public sealed class ConditionGroupBrushConverter : System.Windows.Data.IValueConverter
+    {
+        private static readonly Color[] Palette =
+        {
+            Color.FromRgb(0x4F, 0x74, 0xB8),   // 1 파랑
+            Color.FromRgb(0xA8, 0x4E, 0x63),   // 2 분홍
+            Color.FromRgb(0x4E, 0x8A, 0x4E),   // 3 초록
+            Color.FromRgb(0xA8, 0x7C, 0x3A),   // 4 주황
+            Color.FromRgb(0x7A, 0x5E, 0xA8),   // 5 보라
+            Color.FromRgb(0x3F, 0x82, 0x8A),   // 6 청록
+        };
+
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            int g = 0;
+            try { g = value == null ? 0 : System.Convert.ToInt32(value); } catch { g = 0; }
+            if (g <= 0) return new SolidColorBrush(Color.FromRgb(0x45, 0x45, 0x4C));
+            return new SolidColorBrush(Palette[(g - 1) % Palette.Length]);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>2026-11-01: 그룹 표시 문자열 — 0 은 "—", 나머지는 "1", "2" …</summary>
+    public sealed class ConditionGroupTextConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            int g = 0;
+            try { g = value == null ? 0 : System.Convert.ToInt32(value); } catch { g = 0; }
+            return g <= 0 ? "—" : g.ToString();
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+            => throw new NotSupportedException();
+    }
     public partial class MainWindow : Window
     {
         private WindBotProject? _project;
@@ -48,6 +89,10 @@ namespace WindBotAIEditor
         public static List<string> ExecutorTypes => PluginBuilder.ExecutorTypes.ToList();
         public static List<ConditionKind> ConditionKinds => Models.ConditionKind.All;
         public static List<PickPolicy> PickPolicies => PickPolicy.All;
+        public static List<ResistantModeOption> ResistantModes => ResistantModeOption.All;
+        public static List<ExecutorTypeOption> ExecutorTypeOptions => ExecutorTypeOption.All;   // 2026-11-01: 한글 라벨
+        /// <summary>2026-11-01: 조건 그룹 번호 콤보 (0 = 기본)</summary>
+        public static List<int> CondGroupNumbers => System.Linq.Enumerable.Range(0, 10).ToList();
         public static List<ChoiceKind> ChoiceKinds => ChoiceKind.All;
         public static List<ForbidAction> ForbidActions => ForbidAction.All;
         public static List<TurnScopeOption> TurnScopes => TurnScopeOption.All;
@@ -67,6 +112,7 @@ namespace WindBotAIEditor
         public static List<ChainBasisOption> ChainBases => ChainBasisOption.All;
         public static List<SummonZoneOption> SummonZones => SummonZoneOption.All;
         public static List<PositionOption> Positions => PositionOption.All;
+        public static List<OptionIndexOption> OptionIndexes => OptionIndexOption.All;   // 2026-11-01: 옵션(0=첫째)
 
         private static readonly List<ChoiceOption> RpsChoices = new()
         {
@@ -218,6 +264,7 @@ namespace WindBotAIEditor
             App.EdoproRoot = edopro;
             App.WindBotRoot = windbot;
             _project = new WindBotProject(windbot);
+            DuelLogLocator.SetWindBotRoot(windbot);   // 2026-11-01: duel-log 를 WindBot 폴더에서도 읽는다
             TxtRoot.Text = edopro;
 
             var settings = AppSettings.Load();
@@ -252,6 +299,14 @@ namespace WindBotAIEditor
             }
 
             CardDatabase.Instance.OpenMany(candidates);
+            // 2026-11-01: DB 가 열렸으니 효과 라벨을 새 형식(strN 포함)으로 다시 만든다
+            try
+            {
+                EffectDescCatalog.Instance.ResetLabels();
+                foreach (var c in _choices) c.ResetOptionChoices();   // 옵션desc 후보도 카드DB 기준으로 재생성
+                RefreshEffectDescs(true);
+            }
+            catch { }
             var opened = CardDatabase.Instance.Paths.Count;
             var first = CardDatabase.Instance.Paths.FirstOrDefault() ?? "";
             TxtCdb.Text = $"카드DB {opened}개 · {Path.GetFileName(Path.GetDirectoryName(first))}/{Path.GetFileName(first)}";
@@ -293,6 +348,14 @@ namespace WindBotAIEditor
             _profile.DefaultSummonPosition = (CmbDefaultPosition.SelectedValue as string) ?? "attack";   // B-31
             _profile.AttackOnlyWinnable = ChkAttackOnlyWinnable.IsChecked == true;   // B-36
             _profile.LinkPlaceAware = ChkLinkPlace.IsChecked == true;              // N-5
+            _profile.SkipResistantGlobal = ChkSkipResistantGlobal.IsChecked == true;   // 2026-11-01
+            _profile.SkipDestructImmuneOnDestroy = ChkSkipDestructImmune.IsChecked == true;   // 2026-11-01
+            _profile.SkipEffectImmuneTargets = ChkSkipEffectImmune.IsChecked == true;         // 2026-11-02
+            _profile.SkipEffectImmuneNegate = ChkSkipEffectImmuneNegate.IsChecked == true;    // 2026-11-02
+            _profile.NegateCardIds ??= new List<int>();
+            _profile.SkipDestructImmuneDestroy = ChkSkipDestructImmuneDestroy.IsChecked == true;   // 2026-11-02
+            _profile.DestroyCardIds ??= new List<int>();
+            _profile.EffectImmuneCards ??= new List<int>();
             _profile.FreePlaySetSpell = ChkFreePlaySetSpell.IsChecked == true;                     // B-15
             _profile.FreePlaySetSpellKind = (CmbFreePlaySetKind.SelectedValue as string) ?? "all";
             _profile.FreePlaySetSpellExclude ??= new List<int>();
@@ -325,6 +388,20 @@ namespace WindBotAIEditor
             if (ChkAttackOnlyWinnable != null) ChkAttackOnlyWinnable.IsChecked = p.AttackOnlyWinnable;   // B-36
             if (ChkLinkPlace != null) ChkLinkPlace.IsChecked = p.LinkPlaceAware;   // N-5
             if (CmbDefaultPosition != null) CmbDefaultPosition.SelectedValue = string.IsNullOrWhiteSpace(p.DefaultSummonPosition) ? "attack" : p.DefaultSummonPosition;   // B-31
+            if (ChkSkipResistantGlobal != null) ChkSkipResistantGlobal.IsChecked = p.SkipResistantGlobal;   // 2026-11-01
+            if (ChkSkipDestructImmune != null) ChkSkipDestructImmune.IsChecked = p.SkipDestructImmuneOnDestroy;   // 2026-11-01
+            if (ChkSkipEffectImmune != null) ChkSkipEffectImmune.IsChecked = p.SkipEffectImmuneTargets;   // 2026-11-02
+            if (ChkSkipEffectImmuneNegate != null) ChkSkipEffectImmuneNegate.IsChecked = p.SkipEffectImmuneNegate;   // 2026-11-02
+            p.NegateCardIds ??= new List<int>();
+            if (CardNegate != null) CardNegate.CardId = 0;
+            UpdateNegateText();
+            if (ChkSkipDestructImmuneDestroy != null) ChkSkipDestructImmuneDestroy.IsChecked = p.SkipDestructImmuneDestroy;   // 2026-11-02
+            p.DestroyCardIds ??= new List<int>();
+            if (CardDestroy != null) CardDestroy.CardId = 0;
+            UpdateDestroyCardText();
+            p.EffectImmuneCards ??= new List<int>();
+            if (CardEffectImmune != null) CardEffectImmune.CardId = 0;
+            UpdateEffectImmuneText();
             if (ChkShowPreErrata != null) ChkShowPreErrata.IsChecked = p.ShowPreErrata;          // B-28
             Services.CardDatabase.ShowPreErrata = p.ShowPreErrata;
 
@@ -342,6 +419,9 @@ namespace WindBotAIEditor
             p.FreePlayTributeGuardExcept ??= new List<int>();
             if (CardTributeGuardExcept != null) CardTributeGuardExcept.CardId = 0;
             UpdateTributeGuardExceptText();
+            p.DestructibleImmuneCards ??= new List<int>();
+            if (CardDestructibleImmune != null) CardDestructibleImmune.CardId = 0;
+            UpdateDestructibleImmuneText();
 
             _actions.Clear(); foreach (var x in p.Actions) _actions.Add(x);
             _choices.Clear(); foreach (var x in p.Choices) _choices.Add(x);
@@ -361,6 +441,8 @@ namespace WindBotAIEditor
             SetSettingsCollapsed(true);          // B-9: 규칙 프로필을 읽으면 설정 카드는 기본(접힘)으로
             UpdateProfilePath();
             UpdatePreReleaseWarning();           // B-24: 프리릴리즈 경고(자동 변환 없음)
+            RefreshEffectDescs(true);            // 2026-11-01: 규칙을 읽은 뒤 효과번호 후보(목록)를 채운다
+            foreach (var c in _choices) c.ResetOptionChoices();   // 2026-11-01: 옵션desc 후보도 규칙 기준으로
         }
 
         private void TryLoadProfile(string engine)
@@ -838,6 +920,20 @@ namespace WindBotAIEditor
             if (_profile != null) _profile.LinkPlaceAware = on;
             Status("링크 마커 기반 존 선택: " + (on ? "ON" : "OFF"));
         }
+        /// <summary>2026-11-01: 내성 몹 대상 제외 — 전체 기본값 토글</summary>
+        private void OnSkipResistantGlobalChanged(object sender, RoutedEventArgs e)
+        {
+            bool on = ChkSkipResistantGlobal.IsChecked == true;
+            if (_profile != null) _profile.SkipResistantGlobal = on;
+            Status("내성 몹 대상 제외(전체): " + (on ? "ON" : "OFF"));
+        }
+        /// <summary>2026-11-01: 파괴 선택에서 파괴 내성 카드 제외 — 전역 토글</summary>
+        private void OnSkipDestructImmuneChanged(object sender, RoutedEventArgs e)
+        {
+            bool on = ChkSkipDestructImmune.IsChecked == true;
+            if (_profile != null) _profile.SkipDestructImmuneOnDestroy = on;
+            Status("파괴 선택에서 파괴 내성 카드 제외: " + (on ? "ON" : "OFF"));
+        }
         /// <summary>B-32: 조건의 테마 제외 카드 목록을 비운다 (셀 안의 × 버튼)</summary>
         private void OnClearCondExclude(object sender, RoutedEventArgs e)
         {
@@ -936,6 +1032,48 @@ namespace WindBotAIEditor
         }
 
         /// <summary>B-46: 제물 여력 가드 예외 목록 표시</summary>
+        /// <summary>2026-11-01: 파괴 내성 카드 목록 텍스트 갱신</summary>
+        private void UpdateDestructibleImmuneText()
+        {
+            if (TxtDestructibleImmune == null) return;
+            var ids = _profile?.DestructibleImmuneCards;
+            if (ids == null || ids.Count == 0) { TxtDestructibleImmune.Text = "(없음)"; return; }
+            var sb = new StringBuilder();
+            foreach (var id in ids)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                var nm = Services.CardDatabase.Instance.NameOf(id);
+                sb.Append(id).Append(nm.Length > 0 ? "(" + nm + ")" : "");
+            }
+            TxtDestructibleImmune.Text = sb.ToString();
+        }
+
+        private void OnAddDestructibleImmune(object sender, RoutedEventArgs e)
+            => AddDestructibleImmune(CardDestructibleImmune?.CardId ?? 0);
+
+        private void OnClearDestructibleImmune(object sender, RoutedEventArgs e) => ClearDestructibleImmune();
+
+        private bool AddDestructibleImmune(int id)
+        {
+            if (id <= 0) { Status("카드를 먼저 선택하세요"); return false; }
+            if (_profile == null) return false;
+            _profile.DestructibleImmuneCards ??= new List<int>();
+            if (!_profile.DestructibleImmuneCards.Contains(id))
+                _profile.DestructibleImmuneCards.Add(id);
+            if (CardDestructibleImmune != null) CardDestructibleImmune.CardId = 0;
+            UpdateDestructibleImmuneText();
+            Status("파괴 내성 카드 추가: " + id + " (총 " + _profile.DestructibleImmuneCards.Count + "개)");
+            return true;
+        }
+
+        private void ClearDestructibleImmune()
+        {
+            _profile?.DestructibleImmuneCards?.Clear();
+            if (CardDestructibleImmune != null) CardDestructibleImmune.CardId = 0;
+            UpdateDestructibleImmuneText();
+            Status("파괴 내성 카드 목록을 비웠습니다");
+        }
+
         private void UpdateTributeGuardExceptText()
         {
             if (TxtTributeGuardExcept == null) return;
@@ -1646,6 +1784,11 @@ namespace WindBotAIEditor
             var p = CurrentProfile();
             var forbids = p.Forbids == null ? 0 : p.Forbids.Count;
             var triggers = (p.Triggers == null ? 0 : p.Triggers.Count) + (p.OppTriggers == null ? 0 : p.OppTriggers.Count);
+            RefreshGroupBadges(GridConds?.ItemsSource);
+            RefreshGroupBadges(GridChoiceConds?.ItemsSource);
+            RefreshGroupBadges(GridForbidConds?.ItemsSource);
+            RefreshGroupBadges(GridRouteConds?.ItemsSource);
+
             TxtRuleSummary.Text = "행동 " + p.Actions.Count
                                   + " · 선택 " + p.Choices.Count
                                   + " · 금지 " + forbids
@@ -1834,7 +1977,13 @@ namespace WindBotAIEditor
                 "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
                 "ChkFreePlaySetSpell", "CmbFreePlaySetKind", "CardFreePlaySetExclude", "TxtFreePlaySetExclude", "PnlFreePlaySetSpell",
                 "ChkFreePlayProtectExtra", "CardTributeGuardExcept", "TxtTributeGuardExcept",
-                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace",
+                "CardDestructibleImmune", "TxtDestructibleImmune",
+                "BtnDestructCandAdd", "BtnDestructCandIgnore", "TxtDestructCand",
+                "CardEffectImmune", "TxtEffectImmune", "ChkSkipEffectImmune",
+                "CardNegate", "TxtNegate", "BtnNegateDefault", "ChkSkipEffectImmuneNegate",
+                "CardDestroy", "TxtDestroy", "BtnDestroyDefault", "ChkSkipDestructImmuneDestroy",
+                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace", "ChkSkipResistantGlobal",
+                "ChkSkipDestructImmune",
                 "BtnPreReleaseConvert", "TxtPreReleaseWarn",
                 "TxtRuleSummary", "TxtProfilePath", "TxtBuildLog",
                 "ListDecks", "TxtDeck", "TxtDeckCardFilter", "ListDeckCards", "TxtDeckInfo",
@@ -2069,6 +2218,119 @@ namespace WindBotAIEditor
 
         /// <summary>B-21 검증 요약 (--uicheck 출력용)</summary>
         public string B21Metrics { get; private set; } = "(없음)";
+
+        /// <summary>2026-11-01: 내성 몹 제외 — 전역 옵션 + 규칙별 3상태 검증 요약</summary>
+        public string B49Metrics { get; private set; } = "(없음)";
+
+        /// <summary>2026-11-01: 행동 종류 한글 라벨 검증 요약</summary>
+        public string B50Metrics { get; private set; } = "(없음)";
+
+        /// <summary>
+        /// 2026-11-01: 실행기 타입 콤보 한글화 — ①화면 라벨은 한글 ②**저장값은 영문 Id 유지**(JSON 왕복) 을 확인한다.
+        /// Id 가 바뀌면 생성 코드의 `ExecutorType.Summon` 이 깨지므로 회귀 방지가 필요하다.
+        /// </summary>
+        public List<string> VerifyExecutorTypeLabelUi()
+        {
+            var problems = new List<string>();
+            var opts = ExecutorTypeOption.All;
+            if (opts.Count != 10) problems.Add("B-50: 실행기 타입 목록이 10개가 아님 (" + opts.Count + ")");
+            foreach (var o in opts)
+            {
+                if (string.IsNullOrWhiteSpace(o.Id)) problems.Add("B-50: 빈 Id 항목");
+                if (string.IsNullOrWhiteSpace(o.Label)) problems.Add("B-50: 빈 라벨 (" + o.Id + ")");
+                else if (!System.Text.RegularExpressions.Regex.IsMatch(o.Label, "[가-힣]"))
+                    problems.Add("B-50: 라벨이 한글이 아님 (" + o.Id + "=" + o.Label + ")");
+            }
+            var ids = new System.Collections.Generic.HashSet<string>();
+            foreach (var o in opts) if (!ids.Add(o.Id)) problems.Add("B-50: Id 중복 (" + o.Id + ")");
+            foreach (var required in PluginBuilder.ExecutorTypes)
+                if (ExecutorTypeOption.All.Find(o => o.Id == required) == null)
+                    problems.Add("B-50: 필수 타입 누락 (" + required + ")");
+
+            // 모델 바인딩: 콤보에서 고르면 저장값(영문)이 바뀌고, 되읽으면 같은 라벨이 나와야 한다
+            var a = new ActionRule { Type = "SpSummon" };
+            var aLabelOk = a.TypeName != null && a.TypeName.Id == "SpSummon";
+            a.TypeName = ExecutorTypeOption.Find("Summon");
+            var aSetOk = a.Type == "Summon";
+            var r = new RouteOption { Action = "Attack" };   // 목록에 없는 값도 저장값을 잃지 않아야 한다
+            var rUnknownOk = r.ActionTypeName != null && r.ActionTypeName.Id == "Attack";
+            r.ActionTypeName = ExecutorTypeOption.Find("SpSummon");
+            var rSetOk = r.Action == "SpSummon";
+
+            // JSON 왕복: 영문 Id 가 그대로 유지되는지
+            var prof = new AiProfile();
+            prof.Actions.Add(new ActionRule { Type = "GoToBattlePhase", Card = 0 });
+            var json = JsonSerializer.Serialize(prof, WindBotProject.JsonOpts);
+            var back = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            var jsonOk = back != null && back.Actions.Count == 1 && back.Actions[0].Type == "GoToBattlePhase";
+
+            if (!aLabelOk) problems.Add("B-50: ActionRule.TypeName 이 Type 을 못 읽음");
+            if (!aSetOk) problems.Add("B-50: ActionRule 콤보 선택이 Type 에 반영되지 않음");
+            if (!rUnknownOk) problems.Add("B-50: RouteOption 이 목록에 없는 Action 값을 잃음");
+            if (!rSetOk) problems.Add("B-50: RouteOption 콜보 선택이 Action 에 반영되지 않음");
+            if (!jsonOk) problems.Add("B-50: JSON 왕복에서 type 값이 바뀜");
+
+            B50Metrics = "opts=" + opts.Count +
+                         " label=" + (aLabelOk ? "OK" : "NG") +
+                         " set=" + (aSetOk ? "OK" : "NG") +
+                         " unknown=" + (rUnknownOk ? "OK" : "NG") +
+                         " route=" + (rSetOk ? "OK" : "NG") +
+                         " json=" + (jsonOk ? "OK" : "NG");
+            return problems;
+        }
+
+        /// <summary>
+        /// 2026-11-01: 내성 몹 대상 제외 — ①전역 체크박스 존재/기본값 ②전역 ON 이면 auto 규칙도 필터
+        /// ③전역 OFF 면 "제외" 규칙만 ④"제외 안 함" 은 항상 제외 안 함 ⑤구형 `skipResistant:true` 는 on 으로 승격.
+        /// </summary>
+        public List<string> VerifyResistantUi()
+        {
+            var problems = new List<string>();
+            if (ChkSkipResistantGlobal == null) { problems.Add("B-49: 전역 체크박스(ChkSkipResistantGlobal) 없음"); return problems; }
+            if (ChkSkipResistantGlobal.IsChecked != true) problems.Add("B-49: 전역 기본값이 ON 이 아님");
+
+            var json = JsonSerializer.Serialize(CurrentProfile(), WindBotProject.JsonOpts);
+            var prof = JsonSerializer.Deserialize<AiProfile>(json, WindBotProject.JsonOpts);
+            if (prof == null) { problems.Add("B-49: 프로필 복제 실패"); return problems; }
+            RuleMigration.Normalize(prof);
+
+            prof.Choices.Clear();
+            prof.Choices.Add(new ChoiceRule { Priority = 1, On = "SelectCard", Pick = "firstAvailable", WhenCard = 70088809, ResistantMode = "auto" });
+            prof.Choices.Add(new ChoiceRule { Priority = 2, On = "SelectCard", Pick = "firstAvailable", WhenCard = 93125329, ResistantMode = "off" });
+            prof.Choices.Add(new ChoiceRule { Priority = 3, On = "SelectCard", Pick = "firstAvailable", WhenCard = 100458016, ResistantMode = "on" });
+
+            prof.SkipResistantGlobal = true;
+            prof.DebugEffectLog = true;   // 로그 생성 검사를 결정적으로
+            var srcOn = RuleCodeGen.Generate(prof);
+            var onUses = System.Text.RegularExpressions.Regex.Matches(srcOn, @"= FilterResistant\(").Count;
+            var globalOnOk = onUses == 2;   // auto + on (off 는 제외)
+
+            prof.SkipResistantGlobal = false;
+            var srcOff = RuleCodeGen.Generate(prof);
+            var offUses = System.Text.RegularExpressions.Regex.Matches(srcOff, @"= FilterResistant\(").Count;
+            var globalOffOk = offUses == 1;  // on 만
+
+            var logOk = srcOn.IndexOf("[AI-EDITOR] skipResistant before=", StringComparison.Ordinal) >= 0;
+
+            var legacy = JsonSerializer.Deserialize<AiProfile>(
+                "{\"schemaVersion\":11,\"engine\":\"x\",\"choices\":[{\"on\":\"SelectCard\",\"pick\":\"firstAvailable\",\"whenCard\":1,\"skipResistant\":true}]}",
+                WindBotProject.JsonOpts);
+            RuleMigration.Normalize(legacy);
+            var legacyOk = legacy != null && legacy.SchemaVersion >= 12 && legacy.SkipResistantGlobal
+                           && legacy.Choices.Count == 1 && legacy.Choices[0].EffectiveResistantMode == "on";
+
+            if (!globalOnOk) problems.Add("B-49: 전역 ON 인데 auto/on 규칙 필터 수가 다름 (" + onUses + " != 2)");
+            if (!globalOffOk) problems.Add("B-49: 전역 OFF 인데 on 규칙만 필터되지 않음 (" + offUses + " != 1)");
+            if (!logOk) problems.Add("B-49: skipResistant 로그가 생성되지 않음");
+            if (!legacyOk) problems.Add("B-49: 구형 skipResistant:true 승격/전역 기본 ON 실패");
+
+            B49Metrics = "chk=" + (ChkSkipResistantGlobal.IsChecked == true ? "ON" : "OFF") +
+                         " globalOn=" + (globalOnOk ? "OK" : "NG") +
+                         " globalOff=" + (globalOffOk ? "OK" : "NG") +
+                         " log=" + (logOk ? "OK" : "NG") +
+                         " legacy=" + (legacyOk ? "OK" : "NG");
+            return problems;
+        }
 
         /// <summary>창을 표시하지 않고 레이아웃만 갱신 (템플릿/바인딩 생성)</summary>
         private void Relayout()
@@ -2587,7 +2849,7 @@ namespace WindBotAIEditor
                 RuleMigration.Normalize(legacy);
                 var off11 = JsonSerializer.Deserialize<AiProfile>("{\"schemaVersion\":11,\"engine\":\"x\",\"freePlayProtectExtra\":false}", WindBotProject.JsonOpts);
                 RuleMigration.Normalize(off11);
-                var migOk = legacy != null && legacy.FreePlayProtectExtra && legacy.SchemaVersion == 11
+                var migOk = legacy != null && legacy.FreePlayProtectExtra && legacy.SchemaVersion >= 11   // 2026-11-01: 스키마가 더 올라가도 통과
                             && off11 != null && !off11.FreePlayProtectExtra;
                 if (!migOk) problems.Add("B-16: 마이그레이션(키 없음=ON / 스키마11 OFF 유지) 실패");
 
@@ -3612,6 +3874,60 @@ namespace WindBotAIEditor
 
         private void Status(string msg) => TxtStatus.Text = msg;
 
+        /// <summary>
+        /// 2026-11-01: 그룹 배지 갱신 — 같은 **연속된** 그룹의 첫 행 `(n`, 마지막 행 `n)`, 가운데 `n`, 한 행뿐이면 `(n)`.
+        /// 0(기본)은 `—`. 그룹은 "연속된 같은 번호" 단위다.
+        /// </summary>
+        private static void RefreshGroupBadges(System.Collections.IEnumerable? list)
+        {
+            if (list == null) return;
+            var items = new List<Condition>();
+            foreach (var it in list) { if (it is Condition c) items.Add(c); }
+            if (items.Count == 0) return;
+
+            // 첫 조건은 연결(and/or)이 무시된다 → 콤보 대신 `—` 표시
+            for (int k = 0; k < items.Count; k++) items[k].JoinEnabled = k > 0;
+
+            int i = 0;
+            while (i < items.Count)
+            {
+                int j = i;
+                while (j + 1 < items.Count && items[j + 1].Group == items[i].Group) j++;
+                int g = items[i].Group;
+                for (int k = i; k <= j; k++)
+                {
+                    if (g <= 0) { items[k].GroupBadge = "—"; continue; }
+                    string core = g.ToString();
+                    if (i == j) items[k].GroupBadge = "(" + core + ")";
+                    else if (k == i) items[k].GroupBadge = "(" + core;
+                    else if (k == j) items[k].GroupBadge = core + ")";
+                    else items[k].GroupBadge = core;
+                }
+                i = j + 1;
+            }
+        }
+
+        /// <summary>
+        /// 2026-11-01: 조건 그리드를 선택/편집하면 **생성될 C# 식**을 상태줄에 보여준다.
+        /// 그룹(괄호)이 의도대로 묶였는지 확인하는 가장 확실한 방법(예: `Duel.IsFirst && (A || B)`).
+        /// </summary>
+        private void OnCondGridPreview(object sender, EventArgs e)
+        {
+            try
+            {
+                var grid = sender as DataGrid;
+                if (grid == null) return;
+                var list = grid.ItemsSource as System.Collections.IEnumerable;
+                if (list == null) return;
+                var conds = new List<Condition>();
+                foreach (var it in list) { if (it is Condition c) conds.Add(c); }
+                if (conds.Count == 0) return;
+                RefreshGroupBadges(list);
+                Status("조건식: " + RuleCodeGen.PreviewConditions(conds));
+            }
+            catch { /* 미리보기는 실패해도 무해 */ }
+        }
+
         // ================= 봇 대사 (Dialogs/*.json) =================
 
         private sealed class DialogKeyItem
@@ -3934,6 +4250,17 @@ namespace WindBotAIEditor
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

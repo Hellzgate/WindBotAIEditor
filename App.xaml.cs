@@ -41,6 +41,14 @@ public partial class App : Application
             return;
         }
 
+        // 2026-11-01: 카드 효과번호 목록: --effectdesc <카드ID> [EDOPro폴더]
+        if (e.Args.Length >= 2 && e.Args[0] == "--effectdesc")
+        {
+            int code = RunEffectDesc(e.Args);
+            Shutdown(code);
+            return;
+        }
+
         // 카드 DB 확인: WindBotAIEditor.exe --dbinfo <cards.cdb>
         if (e.Args.Length >= 2 && e.Args[0] == "--dbinfo")
         {
@@ -166,7 +174,73 @@ public partial class App : Application
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
 
+
+            // 2026-11-01: 내성 몹 제외 — 전역 옵션 + 규칙별 3상태
+            total = problems.Count;
+            problems.AddRange(w.VerifyResistantUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             // B-24: 프리릴리즈 → 정규 카드 ID 변환 (배지 · 리플렉션 화이트리스트 · 덱)
+
+            // 2026-11-01: 행동 종류 콤보 한글 라벨 (저장값은 영문 유지)
+            total = problems.Count;
+            problems.AddRange(w.VerifyExecutorTypeLabelUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-51): 효과번호 콤보 = 편집형 아님(눌러도 목록이 열리도록)
+            total = problems.Count;
+            problems.AddRange(w.VerifyEffectPickerUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-52): 선택 규칙 옵션/옵션desc 콤보
+            total = problems.Count;
+            problems.AddRange(w.VerifyOptionPickerUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-53): "이번 턴 효과를 사용한 몬스터" 추적(② 필터 / ③ 조건)
+            total = problems.Count;
+            problems.AddRange(w.VerifyEffectUsedUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-54): 파괴 선택에서 파괴 내성 카드 제외 (전역 옵션)
+            total = problems.Count;
+            problems.AddRange(w.VerifyDestructImmuneUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-55): 파괴 실패 후보 수집(duel-log destruct-fail)
+            total = problems.Count;
+            problems.AddRange(w.VerifyDestructCandUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-01 (B-56): duel-log 2곳 읽기(WindBot 폴더 / %LOCALAPPDATA%)
+            total = problems.Count;
+            problems.AddRange(w.VerifyDuelLogPathsUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-57): 효과 면역 카드 대상 제외(릴리스 제외) 전역 옵션
+            total = problems.Count;
+            problems.AddRange(w.VerifyEffectImmuneUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-58): 무효화 카드 목록 + 효과 면역 카드 체인 금지(발동 차단)
+            total = problems.Count;
+            problems.AddRange(w.VerifyNegateImmuneUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-59): 파괴 카드 목록 + 파괴 내성 카드 체인 금지(발동 차단)
+            total = problems.Count;
+            problems.AddRange(w.VerifyDestroyCardUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             total = problems.Count;
             problems.AddRange(w.VerifyB24Ui());
             for (var i = total; i < problems.Count; i++)
@@ -197,6 +271,8 @@ public partial class App : Application
             Console.WriteLine("b18 " + w.B18Metrics);
             Console.WriteLine("b20 " + w.B20Metrics);
             Console.WriteLine("b21 " + w.B21Metrics);
+            Console.WriteLine("b49 " + w.B49Metrics);
+            Console.WriteLine("b50 " + w.B50Metrics);
             Console.WriteLine("b24 " + w.B24Metrics);
             Console.WriteLine("profile=" + (profilePath == null ? "(없음)" : Path.GetFileName(profilePath) + (loaded ? " OK" : " FAIL")) +
                               " summary=\"" + w.RuleSummaryText + "\"");
@@ -629,6 +705,55 @@ public partial class App : Application
         Console.WriteLine("TARGET " + Path.GetFileName(target) + " ids=" + ids.Count +
                           " pre=" + pre.Count + " convertible=" + convertible.Count);
         return 0;
+    }
+
+    /// <summary>
+    /// 2026-11-01: `--effectdesc &lt;카드ID&gt; [EDOPro폴더]` — 카드의 효과번호(desc)와 설명 문자열(strN)을 출력.
+    /// 효과번호는 `(카드ID &lt;&lt; 20) | n` 이라 사람이 읽기 어려워서, cdb `texts.strN` 을 함께 보여준다.
+    /// </summary>
+    private static int RunEffectDesc(string[] args)
+    {
+        int cardId;
+        if (!int.TryParse(args[1], out cardId) || cardId <= 0)
+        {
+            Console.Error.WriteLine("카드ID 가 올바르지 않습니다: " + args[1]);
+            return 2;
+        }
+
+        var root = args.Length >= 3 ? Path.GetFullPath(args[2]) : @"D:\edopro";
+        var cdbs = new List<string>();
+        if (Directory.Exists(Path.Combine(root, "expansions")))
+            cdbs.AddRange(Directory.GetFiles(Path.Combine(root, "expansions"), "*.cdb"));
+        var repo = Path.Combine(root, "repositories");
+        if (Directory.Exists(repo))
+            cdbs.AddRange(Directory.GetFiles(repo, "*.cdb", SearchOption.AllDirectories));
+        if (cdbs.Count == 0) { Console.Error.WriteLine("cdb 를 찾지 못했습니다: " + root); return 1; }
+
+        if (!CardDatabase.Instance.OpenMany(cdbs)) { Console.Error.WriteLine("DB 열기 실패"); return 1; }
+        var info = CardDatabase.Instance.Info(cardId);
+        if (info == null) { Console.Error.WriteLine("카드를 찾지 못했습니다: " + cardId); return 3; }
+
+        Console.WriteLine(info.Id + " " + info.Name);
+        Console.WriteLine("  desc = " + OneLineText(info.Desc));
+        var any = false;
+        for (var n = 0; n < 16; n++)
+        {
+            var text = CardDatabase.Instance.EffectText(cardId, n);
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            any = true;
+            var value = ((long)cardId << 20) | (long)n;
+            Console.WriteLine("  #" + n + " = " + value + "  ·  " + OneLineText(text));
+        }
+        if (!any) Console.WriteLine("  (strN 없음 — aux.Stringid 설명이 없는 카드)");
+        return 0;
+    }
+
+    private static string OneLineText(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var t = s.Replace("\r", " ").Replace("\n", " ");
+        while (t.IndexOf("  ", StringComparison.Ordinal) >= 0) t = t.Replace("  ", " ");
+        return t.Trim();
     }
 
     private static int RunDbInfo(string path)

@@ -53,6 +53,12 @@ namespace WindBotAIEditor
 
                 string root = App.EdoproRoot ?? "";
                 EffectDescCatalog.Instance.Refresh(root, ids);
+                // 2026-11-01: 규칙에 이미 쓰인 효과번호도 목록에 있게 (콤보가 빈칸으로 보이지 않도록)
+                var used = new List<long>();
+                foreach (var a in _actions) if (a.EffectDesc >= 0) used.Add(a.EffectDesc);
+                foreach (var f in _forbids) if (f.EffectDesc >= 0) used.Add(f.EffectDesc);
+                EffectDescCatalog.Instance.EnsureValues(used);
+                RefreshDestructCandidates();   // 2026-11-01: 파괴 실패 후보(duel-log destruct-fail)도 같이 갱신
                 if (!silent) Status("효과번호 후보: " + EffectDescCatalog.Instance.Status);
             }
             catch (Exception ex)

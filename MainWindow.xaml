@@ -17,6 +17,10 @@
         <SolidColorBrush x:Key="RouteFirstBrush" Color="#2F6FEB"/>
         <SolidColorBrush x:Key="RouteSecondBrush" Color="#E08B2A"/>
 
+        <!-- 2026-11-01: 조건 그룹 배지 색/표시 -->
+        <local:ConditionGroupBrushConverter x:Key="GroupBrush"/>
+        <local:ConditionGroupTextConverter x:Key="GroupText"/>
+
         <!-- ⑤ 트랙 토글 버튼 (B-8): OS 기본 버튼 템플릿의 대비 문제를 피하려고 직접 그린다.
              색은 전부 DynamicResource(테마) — 코드비하인드도 SetResourceReference 로만 지정한다. -->
         <Style x:Key="RouteTrackButton" TargetType="Button">
@@ -288,6 +292,127 @@
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*" MinWidth="120"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="파괴 내성 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       ToolTip="카드 효과로 파괴되지 않는 카드 — '상대 파괴 가능 몬스터 수' 계산에서 제외합니다 (예: 태양신의 수호자-갓 슬라임 101403073)"/>
+                                            <TextBlock Grid.Column="1" Text="(효과로 파괴 불가인 카드)" VerticalAlignment="Center"
+                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                            <controls:CardNameBox Grid.Column="3" x:Name="CardDestructibleImmune"
+                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                  ToolTip="예) 태양신의 수호자-갓 슬라임 101403073 — EFFECT_INDESTRUCTABLE_EFFECT"/>
+                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestructibleImmune"
+                                                    ToolTip="선택한 카드를 파괴 내성 목록에 추가"/>
+                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestructibleImmune"
+                                                    ToolTip="파괴 내성 목록을 비웁니다"/>
+                                        </Grid>
+                                        <TextBlock Margin="20,2,0,0" x:Name="TxtDestructibleImmune" Text="(없음)" FontSize="11"
+                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="파괴 가능 몬스터 수 계산에서 제외할 카드 목록"/>
+                                        <DockPanel Margin="20,6,0,0">
+                                            <Button x:Name="BtnDestructCandAdd" DockPanel.Dock="Left" Content="후보 추가" Margin="0,0,6,0"
+                                                    Click="OnAddDestructCandidates"
+                                                    ToolTip="실전에서 '파괴를 시도했는데 안 죽은' 카드를 위 목록에 넣습니다. 넣은 뒤 [규칙 저장] → [생성 + 컴파일] → WindBot 재시작 (2026-11-01)"/>
+                                            <Button x:Name="BtnDestructCandIgnore" DockPanel.Dock="Left" Content="무시" Margin="0,0,8,0"
+                                                    Click="OnIgnoreDestructCandidates"
+                                                    ToolTip="지금 보이는 후보를 다시 보지 않습니다 (파괴 무효로 실패한 오탐 정리용)"/>
+                                            <TextBlock x:Name="TxtDestructCand" Text="(관찰된 후보 없음)" FontSize="11" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="duel-log 의 destruct-fail 기록에서 모은 후보입니다 — 자동 등록은 하지 않습니다"/>
+                                        </DockPanel>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*" MinWidth="120"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="효과 면역 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       ToolTip="'다른 카드의 효과를 받지 않는' 카드 — 대상 선택에서 제외합니다(릴리스는 예외). 예: 17242023 붉은 눈의 초월흑룡 (Unaffected by your opponent's activated monster and Spell effects)"/>
+                                            <TextBlock Grid.Column="1" Text="(효과를 받지 않는 카드)" VerticalAlignment="Center"
+                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                            <controls:CardNameBox Grid.Column="3" x:Name="CardEffectImmune"
+                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                  ToolTip="예) 17242023 붉은 눈의 초월흑룡 — Unaffected by your opponent's activated monster and Spell effects"/>
+                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddEffectImmune"
+                                                    ToolTip="선택한 카드를 효과 면역 목록에 추가"/>
+                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearEffectImmune"
+                                                    ToolTip="효과 면역 목록을 비웁니다"/>
+                                        </Grid>
+                                        <TextBlock Margin="20,2,0,0" x:Name="TxtEffectImmune" Text="(없음)" FontSize="11"
+                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="대상 선택에서 제외할 '효과를 받지 않는' 카드 목록 (2026-11-02)"/>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*" MinWidth="120"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="무효화 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       ToolTip="뵐러·무한포영처럼 '효과를 무효화'하는 카드 — 위 효과 면역 카드의 효과에 **체인하지 않습니다**(발동 자체 차단). 목록에 없는 카드(노모어벳 등)는 막지 않습니다"/>
+                                            <TextBlock Grid.Column="1" Text="(위 면역 카드에 체인 금지)" VerticalAlignment="Center"
+                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                            <controls:CardNameBox Grid.Column="3" x:Name="CardNegate"
+                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                  ToolTip="예) 97268402 Effect Veiler / 10045474 무한포영"/>
+                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddNegate"
+                                                    ToolTip="선택한 카드를 무효화 카드 목록에 추가"/>
+                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearNegate"
+                                                    ToolTip="무효화 카드 목록을 비웁니다"/>
+                                        </Grid>
+                                        <DockPanel Margin="20,2,0,0">
+                                            <Button x:Name="BtnNegateDefault" DockPanel.Dock="Left" Content="기본값(뵐러·포영)" Margin="0,0,8,0"
+                                                    Click="OnNegateDefaults"
+                                                    ToolTip="뵐러(97268402)와 무한포영(10045474)을 목록에 넣습니다"/>
+                                            <TextBlock x:Name="TxtNegate" Text="(없음)" FontSize="11" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="발동을 막을 무효화 카드 목록 (2026-11-02)"/>
+                                        </DockPanel>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*" MinWidth="120"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="파괴 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       ToolTip="유령토끼처럼 '그 카드를 파괴한다' 계열 — 위 [파괴 내성 카드] 의 효과에 **체인하지 않습니다**(발동 자체 차단)"/>
+                                            <TextBlock Grid.Column="1" Text="(파괴 내성 카드에 체인 금지)" VerticalAlignment="Center"
+                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                            <controls:CardNameBox Grid.Column="3" x:Name="CardDestroy"
+                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                  ToolTip="예) 59438930/59438931 유령토끼 (Ghost Ogre &amp; Snow Rabbit)"/>
+                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestroyCard"
+                                                    ToolTip="선택한 카드를 파괴 카드 목록에 추가"/>
+                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestroyCard"
+                                                    ToolTip="파괴 카드 목록을 비웁니다"/>
+                                        </Grid>
+                                        <DockPanel Margin="20,2,0,0">
+                                            <Button x:Name="BtnDestroyDefault" DockPanel.Dock="Left" Content="기본값(유령토끼)" Margin="0,0,8,0"
+                                                    Click="OnDestroyDefaults"
+                                                    ToolTip="유령토끼(59438930, 59438931)을 목록에 넣습니다"/>
+                                            <TextBlock x:Name="TxtDestroy" Text="(없음)" FontSize="11" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="발동을 막을 파괴 카드 목록 (2026-11-02)"/>
+                                        </DockPanel>
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="140"/>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="140"/>
@@ -378,6 +503,31 @@
                           Checked="OnAttackOnlyWinnableChanged" Unchecked="OnAttackOnlyWinnableChanged">
                     <TextBlock Text="이길 수 없으면 공격하지 않음 (기본: 켜짐)" TextWrapping="Wrap"/>
                 </CheckBox>
+                <CheckBox x:Name="ChkSkipResistantGlobal" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="② 선택 규칙의 기본값 — 대상 선택 전에 내성 몹(대상/효과 보호: IsMonsterInvincible / IsShouldNotBeTarget / IsShouldNotBeMonsterTarget / IsShouldNotBeSpellTrapTarget)을 후보에서 제외합니다. 규칙별 [내성 제외] 를 [제외 안 함] 으로 두면 그 규칙만 무시합니다 (2026-11-01)"
+                          Checked="OnSkipResistantGlobalChanged" Unchecked="OnSkipResistantGlobalChanged">
+                    <TextBlock Text="내성 몹 대상 제외 — 전체 (기본: 켜짐)" TextWrapping="Wrap"/>
+                </CheckBox>
+                <CheckBox x:Name="ChkSkipDestructImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="파괴 선택(hint=Destroy)일 때 '파괴되지 않는 카드'를 후보에서 제외합니다. WindBot 내장 파괴불가 목록 + [파괴 내성 카드] 목록을 봅니다. 전부 파괴 불가면 원래 목록을 씁니다 (2026-11-01)"
+                          Checked="OnSkipDestructImmuneChanged" Unchecked="OnSkipDestructImmuneChanged">
+                    <TextBlock Text="파괴 선택에서 파괴 내성 카드 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                </CheckBox>
+                <CheckBox x:Name="ChkSkipEffectImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="② 선택 규칙의 기본값 — '효과를 받지 않는 카드'(예: 붉은 눈의 초월흑룡)를 대상 후보에서 제외합니다. **릴리스(hint=Release)는 제외하지 않습니다**(제물로는 쓸 수 있음). 목록이 비어 있으면 아무 동작도 하지 않습니다 (2026-11-02)"
+                          Checked="OnSkipEffectImmuneChanged" Unchecked="OnSkipEffectImmuneChanged">
+                    <TextBlock Text="효과 면역 카드 대상 제외 — 릴리스 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                </CheckBox>
+                <CheckBox x:Name="ChkSkipEffectImmuneNegate" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="[무효화 카드] 목록(뵐러·포영)이 [효과 면역 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 대상 후보가 그 카드 하나뿐(n=1)일 때도 카드를 아낍니다. 목록에 없는 카드(노모어벳 등)는 막지 않습니다 (2026-11-02)"
+                          Checked="OnSkipEffectImmuneNegateChanged" Unchecked="OnSkipEffectImmuneNegateChanged">
+                    <TextBlock Text="무효화 카드는 효과 면역 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                </CheckBox>
+                <CheckBox x:Name="ChkSkipDestructImmuneDestroy" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                          ToolTip="[파괴 카드] 목록(유령토끼 등)이 [파괴 내성 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 'Cannot be destroyed by card effects' 몬스터에 유령토끼를 쓰는 낭비를 막습니다 (2026-11-02)"
+                          Checked="OnSkipDestructImmuneDestroyChanged" Unchecked="OnSkipDestructImmuneDestroyChanged">
+                    <TextBlock Text="파괴 카드는 파괴 내성 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                </CheckBox>
                                         <TextBlock Text="소환 존 · 표시 형식 · 금지 세부는 ①③ 탭의 각 규칙 행에서 지정합니다 (전역 설정 없음)"
                                                    Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
                                         <TextBlock Text="현재 규칙 요약은 아래 [규칙 저장] 줄에 표시됩니다"
@@ -450,8 +600,10 @@
                                         <DataGridTemplateColumn Header="행동" Width="140">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.ExecutorTypes}}"
-                                                              SelectedItem="{Binding Type, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.ExecutorTypeOptions}}"
+                                                              SelectedItem="{Binding TypeName, UpdateSourceTrigger=PropertyChanged}"
+                                                              DisplayMemberPath="Label"
+                                                              ToolTip="행동 종류 — 저장값은 영문(ExecutorType) 그대로, 화면만 한글 (2026-11-01)"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -459,11 +611,12 @@
                                         <DataGridTemplateColumn Header="효과번호" Width="170">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedEditableComboBox}" Height="24"
+                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
                                                               ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
                                                               DisplayMemberPath="Label"
-                                                              Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
-                                                              ToolTip="B-45: 효과번호(desc) 필터 — 비우면 무관. [효과번호 갱신] 으로 후보를 모읍니다"/>
+                                                              SelectedValuePath="Value"
+                                                              SelectedValue="{Binding EffectDescValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="B-45: 효과번호(desc) 필터 — 칸 아무 곳이나 누르면 목록이 열립니다. (효과 없음)=무관. 카드ID를 먼저 넣고 [효과번호 갱신] 하면 그 카드의 효과가 목록에 나옵니다"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -507,13 +660,58 @@
                                     <TextBlock Text="연결(and/or)로 AND·OR 혼합 · 값 0 = 전체 · 이벤트 조건은 [대상(누가)] 열로 나/상대 선택" Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </DockPanel>
 
-                                <DataGrid Grid.Row="3" x:Name="GridConds">
+                                <DataGrid Grid.Row="3" x:Name="GridConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
                                         <DataGridTemplateColumn Header="연결" Width="54">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                              SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    <Grid>
+                                                        <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
+                                                                  SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
+                                                            <ComboBox.Style>
+                                                                <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ComboBox.Style>
+                                                        </ComboBox>
+                                                        <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource SubtleFg}"
+                                                                   ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="52">
+                                            <DataGridTemplateColumn.Header>
+                                                <TextBlock Text="그룹" ToolTip="조건 그룹(괄호). 같은 번호끼리 먼저 묶이고, 그룹 사이는 그룹 첫 조건의 연결(and/or)로 이어집니다. 같은 색 = 같은 괄호. 0(—) = 기본. 예: A(0) · B(1) · C(1,or) → A &amp;&amp; (B || C)"/>
+                                            </DataGridTemplateColumn.Header>
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="3" Padding="1"
+                                                            Background="{Binding Group, Converter={StaticResource GroupBrush}}"
+                                                            ToolTip="{Binding GroupBadge}">
+                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" Height="22" BorderThickness="0"
+                                                                  Background="Transparent" Foreground="White" FontWeight="Bold"
+                                                                  ItemsSource="{Binding Source={x:Static local:MainWindow.CondGroupNumbers}}"
+                                                                  SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="그룹 번호 — 같은 번호가 연속이면 한 괄호로 묶입니다. (배지 괄호는 (시작 / )끝 · 색=같은 그룹)"/>
+                                                    </Border>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -663,12 +861,14 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                           </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="내성 제외" Width="76">
+                                        <DataGridTemplateColumn Header="내성 제외" Width="104">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding SkipResistant, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="후보에서 내성 몹(대상/효과 보호)을 제외합니다 — WindBot 내장 목록(InvincibleEnemyMonster / ShouldNotBeTarget / ShouldNotBeMonsterTarget / ShouldNotBeSpellTrapTarget). 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다"/>
+                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
+                                                              ItemsSource="{Binding Source={x:Static local:MainWindow.ResistantModes}}"
+                                                              SelectedItem="{Binding ResistantModeName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              DisplayMemberPath="Label"
+                                                              ToolTip="내성 몹(대상/효과 보호) 제외 — 3상태. [전역 설정 따름] 은 ⚙ AI 설정의 '내성 몹 대상 제외(전체)' 값을 따릅니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-01)"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -699,18 +899,40 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Y/N" Binding="{Binding YesNo, UpdateSourceTrigger=PropertyChanged}" Width="44"/>
-                                        <DataGridTextColumn Header="옵션" Binding="{Binding OptionIndex, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
-                                        <DataGridTemplateColumn Header="옵션desc" Width="92">
+                                        <DataGridTemplateColumn Header="효과 사용" Width="84">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <TextBox x:Name="TxtOptionDesc" Style="{DynamicResource ThemedTextBox}"
-                                                             Text="{Binding OptionDesc, UpdateSourceTrigger=PropertyChanged}"
-                                                             VerticalContentAlignment="Center"
-                                                             ToolTip="SelectOption 의 옵션 문자열 ID (예: 1607328404). 옵션 목록에 이 값이 있을 때만 이 규칙을 적용합니다"/>
+                                                    <CheckBox IsChecked="{Binding SkipEffectUsed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                              ToolTip="이번 턴 이미 효과를 발동한 상대 몬스터를 후보에서 제외합니다 (뵐러·무한포영을 아껴 쓴다). 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-01 신규)"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="Y/N" Binding="{Binding YesNo, UpdateSourceTrigger=PropertyChanged}" Width="44"/>
+                                        <DataGridTemplateColumn Header="옵션" Width="78">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
+                                                              ItemsSource="{Binding Source={x:Static local:MainWindow.OptionIndexes}}"
+                                                              SelectedValuePath="Value"
+                                                              SelectedValue="{Binding OptionIndex, UpdateSourceTrigger=PropertyChanged}"
+                                                              DisplayMemberPath="Label"
+                                                              ToolTip="그 프롬프트 목록에서 몇 번째를 고를지 — 0 = 첫째 (0부터 시작). 카드의 효과 번호가 아닙니다. 목록이 더 짧으면 마지막 항목으로 자동 조정됩니다"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="옵션desc" Width="170">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox x:Name="CmbOptionDesc" Style="{DynamicResource ThemedComboBox}" Height="24"
+                                                              ItemsSource="{Binding OptionChoices}"
+                                                              SelectedValuePath="Value"
+                                                              SelectedValue="{Binding OptionDesc, UpdateSourceTrigger=PropertyChanged}"
+                                                              DisplayMemberPath="Label"
+                                                              ToolTip="어떤 프롬프트인지 구분하는 값 — [발동카드] 의 선택지 문자열(cdb strN)에서 고릅니다. (무관)=모든 목록에 적용. 카드ID를 바꾸면 후보가 그 카드 기준으로 바뀝니다"/>
                                                     <DataTemplate.Triggers>
                                                         <DataTrigger Binding="{Binding IsSelectOption}" Value="False">
-                                                            <Setter TargetName="TxtOptionDesc" Property="Visibility" Value="Collapsed"/>
+                                                            <Setter TargetName="CmbOptionDesc" Property="Visibility" Value="Collapsed"/>
                                                         </DataTrigger>
                                                     </DataTemplate.Triggers>
                                                 </DataTemplate>
@@ -788,13 +1010,58 @@
                                                Foreground="{DynamicResource SubtleFg}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 </DockPanel>
 
-                                <DataGrid Grid.Row="3" x:Name="GridChoiceConds">
+                                <DataGrid Grid.Row="3" x:Name="GridChoiceConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
                                         <DataGridTemplateColumn Header="연결" Width="54">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                              SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    <Grid>
+                                                        <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
+                                                                  SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
+                                                            <ComboBox.Style>
+                                                                <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ComboBox.Style>
+                                                        </ComboBox>
+                                                        <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource SubtleFg}"
+                                                                   ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="52">
+                                            <DataGridTemplateColumn.Header>
+                                                <TextBlock Text="그룹" ToolTip="조건 그룹(괄호). 같은 번호끼리 먼저 묶이고, 그룹 사이는 그룹 첫 조건의 연결(and/or)로 이어집니다. 같은 색 = 같은 괄호. 0(—) = 기본. 예: A(0) · B(1) · C(1,or) → A &amp;&amp; (B || C)"/>
+                                            </DataGridTemplateColumn.Header>
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="3" Padding="1"
+                                                            Background="{Binding Group, Converter={StaticResource GroupBrush}}"
+                                                            ToolTip="{Binding GroupBadge}">
+                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" Height="22" BorderThickness="0"
+                                                                  Background="Transparent" Foreground="White" FontWeight="Bold"
+                                                                  ItemsSource="{Binding Source={x:Static local:MainWindow.CondGroupNumbers}}"
+                                                                  SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="그룹 번호 — 같은 번호가 연속이면 한 괄호로 묶입니다. (배지 괄호는 (시작 / )끝 · 색=같은 그룹)"/>
+                                                    </Border>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -947,11 +1214,12 @@
                                         <DataGridTemplateColumn Header="효과" Width="170">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedEditableComboBox}" Height="24"
+                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
                                                               ItemsSource="{Binding Source={x:Static svc:EffectDescCatalog.Instance}, Path=Items}"
                                                               DisplayMemberPath="Label"
-                                                              Text="{Binding EffectDescText, UpdateSourceTrigger=PropertyChanged}"
-                                                              ToolTip="B-45: 비우면 모든 효과. 후보는 [효과번호 갱신] 으로 모읍니다"/>
+                                                              SelectedValuePath="Value"
+                                                              SelectedValue="{Binding EffectDescValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              ToolTip="B-45: 효과번호(desc) — 칸 아무 곳이나 누르면 목록이 열립니다. (효과 없음)=모든 효과. 카드ID를 먼저 넣고 [효과번호 갱신] 하면 그 카드의 효과가 목록에 나옵니다"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -1038,13 +1306,58 @@
                                     <TextBlock x:Name="ForbidCondTitle" Text="" Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </DockPanel>
 
-                                <DataGrid Grid.Row="3" x:Name="GridForbidConds">
+                                <DataGrid Grid.Row="3" x:Name="GridForbidConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
                                         <DataGridTemplateColumn Header="연결" Width="54">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                              SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    <Grid>
+                                                        <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
+                                                                  SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
+                                                            <ComboBox.Style>
+                                                                <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ComboBox.Style>
+                                                        </ComboBox>
+                                                        <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource SubtleFg}"
+                                                                   ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="52">
+                                            <DataGridTemplateColumn.Header>
+                                                <TextBlock Text="그룹" ToolTip="조건 그룹(괄호). 같은 번호끼리 먼저 묶이고, 그룹 사이는 그룹 첫 조건의 연결(and/or)로 이어집니다. 같은 색 = 같은 괄호. 0(—) = 기본. 예: A(0) · B(1) · C(1,or) → A &amp;&amp; (B || C)"/>
+                                            </DataGridTemplateColumn.Header>
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="3" Padding="1"
+                                                            Background="{Binding Group, Converter={StaticResource GroupBrush}}"
+                                                            ToolTip="{Binding GroupBadge}">
+                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" Height="22" BorderThickness="0"
+                                                                  Background="Transparent" Foreground="White" FontWeight="Bold"
+                                                                  ItemsSource="{Binding Source={x:Static local:MainWindow.CondGroupNumbers}}"
+                                                                  SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="그룹 번호 — 같은 번호가 연속이면 한 괄호로 묶입니다. (배지 괄호는 (시작 / )끝 · 색=같은 그룹)"/>
+                                                    </Border>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -1165,8 +1478,35 @@
                                         <DataGridTemplateColumn Header="연결" Width="54">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                              SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    <Grid>
+                                                        <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
+                                                                  SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
+                                                                  ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
+                                                            <ComboBox.Style>
+                                                                <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ComboBox.Style>
+                                                        </ComboBox>
+                                                        <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource SubtleFg}"
+                                                                   ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -1366,8 +1706,10 @@
                                                                                                 Click="OnRemoveRouteOption" ToolTip="이 순위 삭제"/>
                                                                                         <ComboBox DockPanel.Dock="Right" Width="130" Margin="6,0,0,0"
                                                                                                   Style="{DynamicResource ThemedComboBox}"
-                                                                                                  ItemsSource="{Binding Source={x:Static local:MainWindow.ExecutorTypes}}"
-                                                                                                  SelectedItem="{Binding Action, UpdateSourceTrigger=PropertyChanged}"/>
+                                                                                                  ItemsSource="{Binding Source={x:Static local:MainWindow.ExecutorTypeOptions}}"
+                                                                                                  SelectedItem="{Binding ActionTypeName, UpdateSourceTrigger=PropertyChanged}"
+                                                                                                  DisplayMemberPath="Label"
+                                                                                                  ToolTip="이 순위에서 할 행동 — 저장값은 영문 그대로, 화면만 한글 (2026-11-01)"/>
                                                                                         <TextBlock DockPanel.Dock="Right" Text="→" Margin="6,0,0,0" VerticalAlignment="Center"
                                                                                                    Foreground="{DynamicResource SubtleFg}"/>
                                                                                         <Button DockPanel.Dock="Right" Content="{Binding ConditionBadge}" MinWidth="88" Margin="6,0,0,0"
@@ -1402,13 +1744,58 @@
                                                    Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                     </DockPanel>
 
-                                    <DataGrid Grid.Row="5" x:Name="GridRouteConds">
+                                    <DataGrid Grid.Row="5" x:Name="GridRouteConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                         <DataGrid.Columns>
                                             <DataGridTemplateColumn Header="연결" Width="54">
                                                 <DataGridTemplateColumn.CellTemplate>
                                                     <DataTemplate>
-                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                                  SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"/>
+                                                        <Grid>
+                                                            <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
+                                                                      SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
+                                                                      ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
+                                                                <ComboBox.Style>
+                                                                    <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ComboBox.Style>
+                                                            </ComboBox>
+                                                            <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource SubtleFg}"
+                                                                       ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Width="52">
+                                                <DataGridTemplateColumn.Header>
+                                                    <TextBlock Text="그룹" ToolTip="조건 그룹(괄호). 같은 번호끼리 먼저 묶이고, 그룹 사이는 그룹 첫 조건의 연결(and/or)로 이어집니다. 같은 색 = 같은 괄호. 0(—) = 기본. 예: A(0) · B(1) · C(1,or) → A &amp;&amp; (B || C)"/>
+                                                </DataGridTemplateColumn.Header>
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <Border CornerRadius="3" Padding="1"
+                                                                Background="{Binding Group, Converter={StaticResource GroupBrush}}"
+                                                                ToolTip="{Binding GroupBadge}">
+                                                            <ComboBox Style="{DynamicResource ThemedComboBox}" Height="22" BorderThickness="0"
+                                                                      Background="Transparent" Foreground="White" FontWeight="Bold"
+                                                                      ItemsSource="{Binding Source={x:Static local:MainWindow.CondGroupNumbers}}"
+                                                                      SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                      ToolTip="그룹 번호 — 같은 번호가 연속이면 한 괄호로 묶입니다. (배지 괄호는 (시작 / )끝 · 색=같은 그룹)"/>
+                                                        </Border>
                                                     </DataTemplate>
                                                 </DataGridTemplateColumn.CellTemplate>
                                             </DataGridTemplateColumn>
@@ -1629,6 +2016,10 @@
         </TabControl>
     </DockPanel>
 </Window>
+
+
+
+
 
 
 

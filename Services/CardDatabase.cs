@@ -224,6 +224,37 @@ namespace WindBotAIEditor.Services
             public int Alias { get; set; }
             /// <summary>어느 cdb 에서 찾았는지</summary>
             public string Source { get; set; } = "";
+
+            /// <summary>
+            /// 2026-11-01: `texts.str1`~`str16` — `aux.Stringid(id, n)` 로 표시되는 **효과별 설명 문자열**.
+            /// 효과번호(desc)를 사람이 읽을 수 있게 라벨에 붙일 때 쓴다.
+            /// </summary>
+            public string[] EffectStrings { get; set; } = new string[16];
+        }
+
+        /// <summary>2026-11-01: texts.str1~str16 을 안전하게 읽는다(컬럼이 없는 구형 cdb 대응).</summary>
+        private static string[] BuildEffectStrings(System.Data.IDataRecord r)
+        {
+            var arr = new string[16];
+            for (var i = 0; i < 16; i++)
+            {
+                try
+                {
+                    var idx = 10 + i;
+                    arr[i] = (idx < r.FieldCount && !r.IsDBNull(idx)) ? (r.GetString(idx) ?? "") : "";
+                }
+                catch { arr[i] = ""; }
+            }
+            return arr;
+        }
+
+        /// <summary>2026-11-01: 효과번호 n(0부터) 의 설명 문자열 — 없으면 빈 문자열.</summary>
+        public string EffectText(int cardId, int index)
+        {
+            if (cardId <= 0 || index < 0 || index >= 16) return "";
+            var info = Info(cardId);
+            if (info?.EffectStrings == null || info.EffectStrings.Length <= index) return "";
+            return info.EffectStrings[index] ?? "";
         }
 
         public CardInfo? Info(int id)
@@ -234,7 +265,9 @@ namespace WindBotAIEditor.Services
                 try
                 {
                     using var cmd = conn.CreateCommand();
-                    cmd.CommandText = @"SELECT t.id, t.name, t.desc, d.type, d.atk, d.def, d.level, d.race, d.attribute, d.alias
+                    cmd.CommandText = @"SELECT t.id, t.name, t.desc, d.type, d.atk, d.def, d.level, d.race, d.attribute, d.alias,
+                                               t.str1, t.str2, t.str3, t.str4, t.str5, t.str6, t.str7, t.str8,
+                                               t.str9, t.str10, t.str11, t.str12, t.str13, t.str14, t.str15, t.str16
                                         FROM texts t LEFT JOIN datas d ON d.id = t.id WHERE t.id=$id LIMIT 1";
                     cmd.Parameters.AddWithValue("$id", id);
                     using var r = cmd.ExecuteReader();
@@ -251,7 +284,8 @@ namespace WindBotAIEditor.Services
                         Race = r.IsDBNull(7) ? 0 : r.GetInt64(7),
                         Attribute = r.IsDBNull(8) ? 0 : r.GetInt32(8),
                         Alias = r.IsDBNull(9) ? 0 : r.GetInt32(9),
-                        Source = conn.DataSource
+                        Source = conn.DataSource,
+                        EffectStrings = BuildEffectStrings(r)
                     };
                 }
                 catch { }

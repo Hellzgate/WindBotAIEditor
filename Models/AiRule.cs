@@ -36,8 +36,16 @@ namespace WindBotAIEditor.Models
         /// <summary>우선순위 (낮을수록 먼저 평가)</summary>
         public int Priority { get; set; } = 100;
 
-        /// <summary>ExecutorType 이름 (Summon, SpSummon, Activate ...)</summary>
+        /// <summary>ExecutorType 이름 (Summon, SpSummon, Activate ...) — 저장값은 영문 그대로</summary>
         public string Type { get; set; } = "Activate";
+
+        /// <summary>2026-11-01: 콤보 바인딩용 한글 라벨 (저장값 Type 은 영문 유지)</summary>
+        [JsonIgnore]
+        public ExecutorTypeOption TypeName
+        {
+            get => ExecutorTypeOption.Find(Type);
+            set { if (value != null) Type = value.Id; }
+        }
 
         /// <summary>0 이면 카드 무관 (전체 상황 규칙)</summary>
         public int Card
@@ -71,6 +79,25 @@ namespace WindBotAIEditor.Models
             {
                 var t = (value ?? "").Trim();
                 EffectDesc = (t.Length > 0 && long.TryParse(t, out var v)) ? v : -1;
+                Raise(nameof(EffectDescValue));
+                Raise(nameof(EffectDescText));
+            }
+        }
+
+        /// <summary>
+        /// 2026-11-01: 그리드 콤보(SelectedValue) 바인딩용 — **−1 = 무관(모든 효과)**.
+        /// 편집형 콤보 대신 **일반 콤보**를 쓰면 칸 아무 곳이나 눌러도 목록이 열린다(클릭 안 먹는 문제 해결).
+        /// </summary>
+        [JsonIgnore]
+        public long EffectDescValue
+        {
+            get { return EffectDesc; }
+            set
+            {
+                if (EffectDesc == value) return;
+                EffectDesc = value;
+                Raise(nameof(EffectDescText));
+                Raise(nameof(EffectDescValue));
             }
         }
 
@@ -153,6 +180,39 @@ namespace WindBotAIEditor.Models
 
         /// <summary>앞 조건과의 연결: "and" | "or" (첫 조건은 무시)</summary>
         public string Join { get; set; } = "and";
+
+        /// <summary>
+        /// 2026-11-01: 화면 표시용 — **첫 조건은 연결값이 무시**되므로 콤보 대신 `—` 로 보여준다.
+        /// (그리드 갱신 때 RefreshGroupBadges 가 인덱스 0 에 대해 false 로 설정)
+        /// </summary>
+        [JsonIgnore]
+        public bool JoinEnabled { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-01: **조건 그룹(괄호)** — 같은 번호끼리 먼저 묶이고, 그룹 사이는
+        /// **그룹의 첫 조건**의 <see cref="Join"/> 으로 연결된다. 0 = 기본 그룹.
+        /// 예: `A(그룹0)` · `B(그룹1,and)` · `C(그룹1,or)` → `A &amp;&amp; (B || C)`.
+        /// (기존 JSON 은 키가 없어 0 → 지금까지와 완전히 동일한 식이 나온다)
+        /// </summary>
+        public int Group
+        {
+            get => _group;
+            set
+            {
+                if (Set(ref _group, value))
+                {
+                    Raise(nameof(GroupBadge));   // 배지((1 / 1) …) 즉시 갱신
+                }
+            }
+        }
+        private int _group;
+
+        /// <summary>
+        /// 2026-11-01: 화면 표시용 배지 문자열 — 같은 **연속된** 그룹의 첫 행에 `(`, 마지막 행에 `)` 를 붙인다.
+        /// (그룹은 "연속된 같은 번호" 단위다. 중간에 다른 번호가 끼면 별개 그룹)
+        /// </summary>
+        [JsonIgnore]
+        public string GroupBadge { get; set; } = "";
 
         /// <summary>B-14: 조건 부정 — 식 전체를 !(...) 로 감싼다</summary>
         public bool Not { get; set; }
@@ -345,6 +405,31 @@ namespace WindBotAIEditor.Models
         /// <summary>B-14: SelectOption 옵션 desc(문자열 ID). 0 = 무관</summary>
         public long OptionDesc { get; set; }
 
+        private ObservableCollection<Services.EffectDescOption>? _optionChoices;
+
+        /// <summary>
+        /// 2026-11-01: `옵션desc` 콤보 후보 — **whenCard 카드**의 cdb `texts.strN`(=`aux.Stringid` 선택지 문자열).
+        /// 숫자(105337874022402)를 외우지 않고 `#2 · Return 1 card to the Deck, then draw 1 card` 로 고른다.
+        /// </summary>
+        [JsonIgnore]
+        public ObservableCollection<Services.EffectDescOption> OptionChoices
+        {
+            get
+            {
+                if (_optionChoices == null)
+                    _optionChoices = new ObservableCollection<Services.EffectDescOption>(
+                        Services.EffectDescCatalog.BuildChoices(WhenCard, OptionDesc));
+                return _optionChoices;
+            }
+        }
+
+        /// <summary>카드 지정/카드DB 변경 시 후보를 다시 만든다</summary>
+        public void ResetOptionChoices()
+        {
+            _optionChoices = null;
+            Raise(nameof(OptionChoices));
+        }
+
         [JsonIgnore]
         public string ThemePickText => IsThemeMatch
             ? "테마 " + ThemeCode + (ThemeMonsterOnly ? " · 몬스터만" : "") + " · 제외 " + (ExcludeCards?.Count ?? 0)
@@ -359,7 +444,11 @@ namespace WindBotAIEditor.Models
             get => _whenCard;
             set
             {
-                if (Set(ref _whenCard, value)) Raise(nameof(WhenCardName));
+                if (Set(ref _whenCard, value))
+                {
+                    Raise(nameof(WhenCardName));
+                    ResetOptionChoices();   // 2026-11-01: 옵션desc 후보는 카드마다 다르다
+                }
             }
         }
 
@@ -373,6 +462,36 @@ namespace WindBotAIEditor.Models
         /// 예: 금운수-마룡(93125329)의 묘지 효과 대상 — 내성 몹을 골라 효과를 날리지 않게.
         /// </summary>
         public bool SkipResistant { get; set; }
+
+        /// <summary>
+        /// 2026-11-01: 내성 몹 제외 **3상태** — "" (미지정, 구형 JSON 호환) / auto (전역 설정 따름) /
+        /// on (항상 제외) / off (제외 안 함). 비어 있으면 `SkipResistant` 값을 사용한다.
+        /// </summary>
+        public string ResistantMode { get; set; } = "";
+
+        /// <summary>실효 모드 — 구형 `skipResistant:true` 를 "on" 으로 승격.</summary>
+        [JsonIgnore]
+        public string EffectiveResistantMode
+        {
+            get
+            {
+                if (ResistantMode == "on" || ResistantMode == "off" || ResistantMode == "auto") return ResistantMode;
+                return SkipResistant ? "on" : "auto";
+            }
+        }
+
+        /// <summary>② 그리드 콤보 바인딩용</summary>
+        [JsonIgnore]
+        public ResistantModeOption ResistantModeName
+        {
+            get => ResistantModeOption.Find(EffectiveResistantMode);
+            set
+            {
+                if (value == null) return;
+                ResistantMode = value.Id;
+                Raise(nameof(EffectiveResistantMode));
+            }
+        }
 
         /// <summary>
         /// 2026-10-30: 후보에서 **효과가 무효된** 카드를 제외한다(`ClientCard.IsDisabled()`).
@@ -391,6 +510,15 @@ namespace WindBotAIEditor.Models
         /// `SkipFaceDown` 과 동시에 켜면 뒷면 제외가 먼저 적용된다.
         /// </summary>
         public bool OnlyFaceUp { get; set; }
+
+        /// <summary>
+        /// 2026-11-01: **이번 턴 이미 효과를 발동한 상대 몬스터**를 후보에서 제외한다.
+        /// 뵐러(97268402)·무한포영(10045474)처럼 "지금 효과를 낼 수 있는 몬스터"를 대상으로 잡아야 하는 카드에서
+        /// 이미 효과를 쓴 몬스터에게 날아가는 낭비를 막는다.
+        /// 판정: 실행기가 `OnChaining` 에서 기록한 (카드ID|존) 목록을 `OnNewTurn` 에서 비운다.
+        /// 주의: 그 몬스터에 **남은 다른 효과**가 있으면 제외하는 것이 손해일 수 있다(규칙별로 켠다).
+        /// </summary>
+        public bool SkipEffectUsed { get; set; }
 
         /// <summary>
         /// B-25: 선택 힌트(<c>hint</c>)가 이 값일 때만 적용 (0 = 무관).
@@ -624,8 +752,16 @@ namespace WindBotAIEditor.Models
             set { if (Set(ref _card, value)) Raise(nameof(CardName)); }
         }
 
-        /// <summary>ExecutorType 이름</summary>
+        /// <summary>ExecutorType 이름 — 저장값은 영문 그대로</summary>
         public string Action { get; set; } = "Summon";
+
+        /// <summary>2026-11-01: 콤보 바인딩용 한글 라벨 (저장값 Action 은 영문 유지)</summary>
+        [JsonIgnore]
+        public ExecutorTypeOption ActionTypeName
+        {
+            get => ExecutorTypeOption.Find(Action);
+            set { if (value != null) Action = value.Id; }
+        }
 
         /// <summary>이 순위를 실행할 조건. 비어 있으면 무조건 만족.</summary>
         public List<Condition> Conditions { get; set; } = new List<Condition>();
@@ -720,7 +856,7 @@ namespace WindBotAIEditor.Models
     {
         public string Engine { get; set; } = "MyDeck";
         public string Description { get; set; } = "";
-        public int SchemaVersion { get; set; } = 11;
+        public int SchemaVersion { get; set; } = 13;
         public List<ActionRule> Actions { get; set; } = new List<ActionRule>();
         public List<ChoiceRule> Choices { get; set; } = new List<ChoiceRule>();
         public List<ForbidRule> Forbids { get; set; } = new List<ForbidRule>();
@@ -833,6 +969,57 @@ namespace WindBotAIEditor.Models
         /// </summary>
         public List<int> FreePlayTributeGuardExcept { get; set; } = new List<int>();
 
+        /// <summary>
+        /// 2026-11-01: **전역** 내성 몹 제외 — ② 선택 규칙의 기본값. 기본 <b>ON</b>.
+        /// WindBot 실행기 73개 중 **56개(77%)** 가 대상 선택 전에 내성 몹을 걸러낸다(가드 277회).
+        /// 규칙별 `resistantMode` 로 `제외 안 함` 을 고르면 이 전역값을 무시한다.
+        /// </summary>
+        public bool SkipResistantGlobal { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-01: **파괴 선택**(`hint == HintMsg.Destroy`)일 때 "파괴되지 않는 카드"를 후보에서 제외한다 (기본 ON).
+        /// 파괴 내성은 대상 내성과 다르다 — `Unaffected by other cards' effects` 같은 카드는 대상은 되지만 죽지 않는다.
+        /// 판정 = WindBot 내장 `IsMonsterInvincible()` + 사용자 목록 `DestructibleImmuneCards`(커스텀 카드용).
+        /// 전부 파괴 불가면 원본 목록을 쓴다(엔진이 요구한 최소 선택 수 보장).
+        /// </summary>
+        public bool SkipDestructImmuneOnDestroy { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-02: **효과를 받지 않는 카드** 목록 (`Unaffected by other cards' effects` 등).
+        /// 예: 17242023 붉은 눈의 초월흑룡 = "Unaffected by your opponent's activated monster and Spell effects" (뵐러/포영 무효).
+        /// 대상 선택에서 제외한다 — 단 **릴리스(hint=Release)는 제외하지 않는다**(제물로는 쓸 수 있으므로).
+        /// </summary>
+        public List<int> EffectImmuneCards { get; set; } = new List<int>();
+
+        /// <summary>2026-11-02: 효과 면역 카드를 대상에서 제외할지 (전역, 기본 ON · 목록이 비면 생성 코드 0줄)</summary>
+        public bool SkipEffectImmuneTargets { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-02: **무효화 카드** 목록 (뵐러 97268402 · 무한포영 10045474 등).
+        /// '효과 면역 카드'의 효과에 이 카드들이 체인하면 아무 효과도 없으므로 **발동 자체를 막는다**.
+        /// 목록에 없는 카드(노모어벳 등)는 막지 않는다 — 정당한 체인을 살리기 위해.
+        /// </summary>
+        public List<int> NegateCardIds { get; set; } = new List<int>();
+
+        /// <summary>2026-11-02: 무효화 카드가 효과 면역 카드의 효과에 체인하는 것을 막을지 (전역, 기본 ON)</summary>
+        public bool SkipEffectImmuneNegate { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-02: **파괴 카드** 목록 (유령토끼 59438930/59438931 등 — "그 카드를 파괴한다").
+        /// '파괴 내성 카드'의 효과에 체인하면 파괴가 무효이므로 **발동 자체를 막는다**.
+        /// </summary>
+        public List<int> DestroyCardIds { get; set; } = new List<int>();
+
+        /// <summary>2026-11-02: 파괴 카드가 파괴 내성 카드의 효과에 체인하는 것을 막을지 (전역, 기본 ON)</summary>
+        public bool SkipDestructImmuneDestroy { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-01: **카드 효과로 파괴 불가**인 카드 목록(사용자 지정). `enemyDestructibleCount` /
+        /// `myDestructibleCount` 계산에서 제외한다. WindBot 내장 목록(`IsMonsterInvincible`)에 없는 카드
+        /// (예: 태양신의 수호자-갓 슬라임 101403073 — `EFFECT_INDESTRUCTABLE_EFFECT`)를 보완한다.
+        /// </summary>
+        public List<int> DestructibleImmuneCards { get; set; } = new List<int>();
+
     }
 
     /// <summary>특정 카드의 특정 행동을 금지하는 규칙.</summary>
@@ -869,6 +1056,25 @@ namespace WindBotAIEditor.Models
             {
                 var t = (value ?? "").Trim();
                 EffectDesc = (t.Length > 0 && long.TryParse(t, out var v)) ? v : -1;
+                Raise(nameof(EffectDescValue));
+                Raise(nameof(EffectDescText));
+            }
+        }
+
+        /// <summary>
+        /// 2026-11-01: 그리드 콤보(SelectedValue) 바인딩용 — **−1 = 무관(모든 효과)**.
+        /// 편집형 콤보 대신 **일반 콤보**를 쓰면 칸 아무 곳이나 눌러도 목록이 열린다(클릭 안 먹는 문제 해결).
+        /// </summary>
+        [JsonIgnore]
+        public long EffectDescValue
+        {
+            get { return EffectDesc; }
+            set
+            {
+                if (EffectDesc == value) return;
+                EffectDesc = value;
+                Raise(nameof(EffectDescText));
+                Raise(nameof(EffectDescValue));
             }
         }
 
@@ -1028,6 +1234,62 @@ namespace WindBotAIEditor.Models
         public override string ToString() => Label;
     }
 
+    /// <summary>
+    /// 2026-11-01: 실행기 타입(ExecutorType) 콤보 — 저장값은 **영문 Id 그대로**, 화면에는 한글 라벨을 보여준다.
+    /// (코드 생성이 `ExecutorType.Summon` 처럼 영문 이름을 쓰므로 Id 는 절대 바꾸면 안 된다)
+    /// </summary>
+    public class ExecutorTypeOption
+    {
+        public string Id { get; set; } = "";
+        public string Label { get; set; } = "";
+
+        public static readonly List<ExecutorTypeOption> All = new List<ExecutorTypeOption>
+        {
+            new ExecutorTypeOption { Id = "Activate",         Label = "발동" },
+            new ExecutorTypeOption { Id = "Summon",           Label = "일반 소환" },
+            new ExecutorTypeOption { Id = "SpSummon",         Label = "특수 소환" },
+            new ExecutorTypeOption { Id = "SummonOrSet",      Label = "일반 소환 또는 세트" },
+            new ExecutorTypeOption { Id = "MonsterSet",       Label = "몬스터 세트" },
+            new ExecutorTypeOption { Id = "SpellSet",         Label = "마법·함정 세트" },
+            new ExecutorTypeOption { Id = "Repos",            Label = "표시형식 변경" },
+            new ExecutorTypeOption { Id = "GoToBattlePhase",  Label = "배틀 페이즈로" },
+            new ExecutorTypeOption { Id = "GoToMainPhase2",   Label = "메인 페이즈 2로" },
+            new ExecutorTypeOption { Id = "GoToEndPhase",     Label = "엔드 페이즈로" },
+        };
+
+        public static ExecutorTypeOption Find(string id)
+        {
+            var found = All.Find(t => t.Id == id);
+            if (found != null) return found;
+            // 목록에 없는 값(구형 JSON 등)은 그대로 보여준다 — 저장값을 잃지 않기 위해 임시 항목을 만든다
+            return new ExecutorTypeOption { Id = id ?? "", Label = id ?? "" };
+        }
+
+        public override string ToString() => Label;
+    }
+
+    /// <summary>② 선택 규칙의 내성 몹 제외 3상태 (2026-11-01)</summary>
+    public class ResistantModeOption
+    {
+        public string Id { get; set; } = "";
+        public string Label { get; set; } = "";
+
+        public static readonly List<ResistantModeOption> All = new List<ResistantModeOption>
+        {
+            new ResistantModeOption { Id = "auto", Label = "전역 설정 따름" },
+            new ResistantModeOption { Id = "on",   Label = "제외" },
+            new ResistantModeOption { Id = "off",  Label = "제외 안 함" },
+        };
+
+        public static ResistantModeOption Find(string id)
+        {
+            var found = All.Find(t => t.Id == id);
+            return found ?? All[0];
+        }
+
+        public override string ToString() => Label;
+    }
+
     /// <summary>금지 조건 해석 방식</summary>
     public class ConditionModeOption
     {
@@ -1071,6 +1333,23 @@ namespace WindBotAIEditor.Models
         };
 
         public static FreePlaySetKindOption Find(string id) => All.Find(t => t.Id == id) ?? All[0];
+        public override string ToString() => Label;
+    }
+
+    /// <summary>2026-11-01: SelectOption 응답 인덱스 — 0=목록의 첫째 (0부터 시작)</summary>
+    public class OptionIndexOption
+    {
+        public int Value { get; set; }
+        public string Label { get; set; } = "";
+        public static readonly List<OptionIndexOption> All = new List<OptionIndexOption>
+        {
+            new OptionIndexOption { Value = 0, Label = "0 · 첫째" },
+            new OptionIndexOption { Value = 1, Label = "1 · 둘째" },
+            new OptionIndexOption { Value = 2, Label = "2 · 셋째" },
+            new OptionIndexOption { Value = 3, Label = "3 · 넷째" },
+            new OptionIndexOption { Value = 4, Label = "4 · 다섯째" },
+        };
+        public static OptionIndexOption Find(int value) => All.Find(t => t.Value == value) ?? All[0];
         public override string ToString() => Label;
     }
 
@@ -1213,6 +1492,10 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "enemyAttackingCount",Label = "상대 공격 표시 몬스터 수", NeedsValue = true },
             new ConditionKind { Id = "enemyFaceUpCount",  Label = "상대 필드 앞면 카드 수", NeedsValue = true, NeedsSide = false },
             new ConditionKind { Id = "enemyFaceDownCount",Label = "상대 필드 뒷면 카드 수", NeedsValue = true, NeedsSide = false },
+            // 2026-11-01: 앞면 마법/함정만 (지속·필드·장착) — 제거 대상 판단
+            new ConditionKind { Id = "enemyFaceUpSpellCount", Label = "상대 필드 앞면 마법/함정 수", NeedsValue = true, NeedsSide = false },
+            // 2026-11-01: 이번 턴 효과를 아직 발동하지 않은 상대 몬스터 수 (뵐러/포영을 쓸 가치가 있는지)
+            new ConditionKind { Id = "enemyUnusedEffectCount", Label = "상대 필드 '효과 미사용' 몬스터 수", NeedsValue = true, NeedsSide = false },
             new ConditionKind { Id = "myMonsterCount",    Label = "내 필드 몬스터 수", NeedsValue = true },
             new ConditionKind { Id = "myHandCount",       Label = "내 패 수", NeedsValue = true },
             new ConditionKind { Id = "myLp",              Label = "내 LP", NeedsValue = true },
@@ -1282,6 +1565,8 @@ namespace WindBotAIEditor.Models
             // 2026-10-30: 대상 기준 무효 판정 — cardIsDisabled 는 '발동하는 카드' 기준이라 대상 판정에 못 쓴다
             new ConditionKind { Id = "chainLastDisabled", Label = "체인 마지막 카드가 무효", NeedsValue = false },
             new ConditionKind { Id = "chainHasDisabled",  Label = "체인에 무효 카드 있음", NeedsValue = false },
+            // 2026-11-01: 체인 마지막 링크가 **상대 필드 몬스터**인가 — 뵐러/포영은 이때만 의미가 있다
+            new ConditionKind { Id = "chainLastEnemyFieldMonster", Label = "체인 마지막 카드가 상대 필드 몬스터", NeedsValue = false },
             // 2026-10-30: 필드/자원 수치 + 이 카드의 표시 상태 (문서 29 P1 잔여분)
             new ConditionKind { Id = "myFaceUpCount",   Label = "내 필드 앞면 카드 수", NeedsValue = true },
             new ConditionKind { Id = "myFaceDownCount", Label = "내 필드 뒷면 카드 수", NeedsValue = true },
@@ -1292,9 +1577,21 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "deckCount",       Label = "내 덱 남은 장수", NeedsValue = true },
             new ConditionKind { Id = "extraCount",      Label = "내 엑스트라 덱 장수", NeedsValue = true },
             new ConditionKind { Id = "bestAttackDiff",  Label = "공격력 차이(내 최고 − 상대 최고)", NeedsValue = true },
+            // 2026-11-01: 수비 표시 대응 — 상대 최고 수비력 / 내 공격력과의 차이
+            new ConditionKind { Id = "enemyBestDefense",        Label = "상대 최고 수비력(수비 표시)", NeedsValue = true },
+            new ConditionKind { Id = "bestAttackVsDefenseDiff", Label = "공격력-수비력 차이(내 최고 공격 − 상대 수비 표시 최고 수비)", NeedsValue = true },
             new ConditionKind { Id = "cardIsFaceup",    Label = "이 카드는 앞면", NeedsValue = false },
             new ConditionKind { Id = "cardIsFacedown",  Label = "이 카드는 뒷면", NeedsValue = false },
             new ConditionKind { Id = "cardIsDefense",   Label = "이 카드는 수비 표시", NeedsValue = false },
+            // 2026-11-01: 파괴 효과 판단용 — "파괴 내성"만 제외한 수 (대상 내성과 별개)
+            new ConditionKind { Id = "enemyDestructibleCount", Label = "상대 필드 파괴 가능 몬스터 수", NeedsValue = true },
+            new ConditionKind { Id = "myDestructibleCount",    Label = "내 필드 파괴 가능 몬스터 수", NeedsValue = true },
+            // 2026-11-01: "필드에 세트(뒷면)된 특정 카드" — hasOnField 는 앞/뒤면 구분이 없다
+            new ConditionKind { Id = "fieldHasFacedownCard", Label = "필드에 뒷면(세트)인 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+            // 2026-11-01: "패 또는 필드에 세트" — AND/OR 좌결합 한계 때문에 한 조건으로 묶는다
+            new ConditionKind { Id = "hasInHandOrSet", Label = "패 또는 필드에 세트로 보유", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+            // 2026-11-01: 갤럭시 라인 — 필드의 그 엑시즈가 소재 N개 이상 (안티매터 조건)
+            new ConditionKind { Id = "xyzMaterialAtLeast", Label = "필드의 엑시즈 소재 N개 이상", NeedsValue = true, NeedsCard = true, NeedsSide = true },
         };
 
         public static ConditionKind Find(string id) =>
@@ -1364,7 +1661,43 @@ namespace WindBotAIEditor.Models
             foreach (var c in p.Choices ?? new List<ChoiceRule>()) { if (c == null) continue; c.Conditions ??= new List<Condition>(); c.ExcludeCards ??= new List<int>(); Fix(c.Conditions); }
             NormalizeFreePlaySetSpell(p);
             NormalizeFreePlayProtectExtra(p);
+            NormalizeSkipResistant(p);
+            NormalizeDestructibleImmune(p);
             NormalizeRoutes(p);
+        }
+
+        /// <summary>
+        /// 2026-11-01: 내성 몹 제외 — 전역 옵션 + 규칙별 3상태 마이그레이션.
+        /// 스키마 11 이하(키 없음)는 전역 ON 으로 맞추고, 규칙별 `skipResistant:true` 는 `resistantMode:"on"` 으로 승격한다.
+        /// 이미 `resistantMode` 가 있는 규칙은 건드리지 않는다.
+        /// </summary>
+        /// <summary>
+        /// 2026-11-01: 파괴 내성 카드 목록 정규화 — 중복/0 제거. 스키마 12 이하도 목록은 빈 배열로 시작한다(스키마 13).
+        /// </summary>
+        public static void NormalizeDestructibleImmune(AiProfile? p)
+        {
+            if (p == null) return;
+            var cleaned = new List<int>();
+            foreach (var id in (p.DestructibleImmuneCards ?? new List<int>()))
+                if (id > 0 && !cleaned.Contains(id)) cleaned.Add(id);
+            p.DestructibleImmuneCards = cleaned;
+            if (p.SchemaVersion < 13) p.SchemaVersion = 13;
+        }
+
+        public static void NormalizeSkipResistant(AiProfile? p)
+        {
+            if (p == null) return;
+            if (p.SchemaVersion < 12)
+            {
+                p.SkipResistantGlobal = true;
+                p.SchemaVersion = 12;
+            }
+            foreach (var c in p.Choices ?? new List<ChoiceRule>())
+            {
+                if (c == null) continue;
+                if (c.ResistantMode != "on" && c.ResistantMode != "off" && c.ResistantMode != "auto")
+                    c.ResistantMode = c.SkipResistant ? "on" : "auto";
+            }
         }
 
         /// <summary>
@@ -1525,6 +1858,17 @@ namespace WindBotAIEditor.Models
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

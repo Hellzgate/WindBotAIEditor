@@ -142,6 +142,17 @@ namespace WindBotAIEditor.Services
 
             bool stopOthers = triggers.Any(t => t.StopOthers);
             int avoidColumnCard = p.AvoidColumnCard;   // 마함 열 회피(무한포영 등)
+            // 2026-11-02: '효과를 받지 않는 카드' 목록이 있고 옵션이 켜져 있으면 대상 선택에서 제외(릴리스 제외)
+            bool needEffectImmune = p.SkipEffectImmuneTargets && p.EffectImmuneCards != null && p.EffectImmuneCards.Count > 0;
+            // 2026-11-02: 무효화 카드(뵐러/포영)가 '효과 면역 카드'의 효과에 체인하는 것을 발동 단계에서 막는다
+            bool needNegateVsImmune = p.SkipEffectImmuneNegate && needEffectImmune
+                                      && p.NegateCardIds != null && p.NegateCardIds.Count > 0;
+            // 2026-11-02: 파괴 카드(유령토끼 등)가 '파괴 내성 카드'의 효과에 체인하는 것을 발동 단계에서 막는다
+            bool needDestroyVsImmune = p.SkipDestructImmuneDestroy
+                                       && p.DestructibleImmuneCards != null && p.DestructibleImmuneCards.Count > 0
+                                       && p.DestroyCardIds != null && p.DestroyCardIds.Count > 0;
+            // 2026-11-01: "이번 턴 효과를 사용한 몬스터" 추적이 필요한가 (조건 enemyUnusedEffectCount / ② 필터 skipEffectUsed)
+            bool needEffectUsed = UsesEffectUsed(p, choices, firstSets, secondSets);
             bool protectExtra = p.FreePlayProtectExtra;   // B-16: 릴리스/제물에서 엑스트라 덱 몬스터 제외
             // B-18: 자유 플레이 Summon 실행기가 실제로 배출될 때만 "제물 여력" 가드/헬퍼를 넣는다.
             //   ① 행동으로 명시한 Summon 은 건드리지 않는다(자유 플레이 전용).
@@ -301,11 +312,15 @@ namespace WindBotAIEditor.Services
             if (p.DebugEffectLog)
             {
                 sb.AppendLine();
-                sb.AppendLine("        // B-27: 결정 로그 — 콘솔 + %LOCALAPPDATA%\\WindBotAIEditor\\duel-log.txt (2MB 넘으면 새로 시작)");
+                sb.AppendLine("        // B-27: 결정 로그 — 콘솔 + %LOCALAPPDATA%\\WindBotAIEditor\\duel-log.txt (30MB 넘으면 .old 로 백업)");
                 sb.AppendLine("        // B-42: 안드로이드 Mono BCL 은 ILLink 로 트리밍되어 일부 API 가 **없다**. 아래 조합만 사용한다.");
                 sb.AppendLine("        //   없음: File.AppendAllText / File.WriteAllText / File.ReadAllText / Path.GetTempPath / FileSystemInfo.Delete");
                 sb.AppendLine("        //   있음: File.AppendText · StreamWriter.WriteLine · FileInfo.Length · File.Delete · Path.Combine · Directory.*");
                 sb.AppendLine("        private static readonly object _logLock = new object();");
+                sb.AppendLine("        // 2026-11-01: 로그 경로/상태 — 경로는 1회만 확정하고, 실패가 누적되면 파일 로그를 끈다(예외 폭주 방지)");
+                sb.AppendLine("        private static string _logPath;");
+                sb.AppendLine("        private static bool _logOff;");
+                sb.AppendLine("        private static int _logFail;");
                 sb.AppendLine("        // 2026-10-30: 판정 시점 상태 — 조건(턴/페이즈/체인) 검증용");
                 sb.AppendLine("        private string StateStr()");
                 sb.AppendLine("        {");
@@ -324,29 +339,116 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
                 sb.AppendLine("        private static void LogToFile(string msg)");
                 sb.AppendLine("        {");
-                sb.AppendLine("            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);");
-                sb.AppendLine("            string dir = System.IO.Path.Combine(baseDir, \"WindBotAIEditor\");");
-                sb.AppendLine("            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);");
-                sb.AppendLine("            string path = System.IO.Path.Combine(dir, \"duel-log.txt\");");
+                sb.AppendLine("            if (_logOff) return;");
+                sb.AppendLine("            string path;");
+                sb.AppendLine("            try { path = ResolveLogPath(); } catch { _logOff = true; return; }   // 경로 확정 중 API 누락도 여기서 차단");
+                sb.AppendLine("            if (path == null) { _logOff = true; return; }");
+                sb.AppendLine("            string dir = System.IO.Path.GetDirectoryName(path);");
                 sb.AppendLine("            lock (_logLock)");
                 sb.AppendLine("            {");
-                sb.AppendLine("                System.IO.FileInfo fi = new System.IO.FileInfo(path);");
-                sb.AppendLine("                if (fi.Exists && fi.Length > 8388608)   // 2026-10-30: 2MB → 8MB");
+                sb.AppendLine("                try");
                 sb.AppendLine("                {");
-                sb.AppendLine("                    if (Environment.OSVersion.Platform == PlatformID.Win32NT) RotateLog(path);   // .old 로 백업(Windows)");
-                sb.AppendLine("                    else System.IO.File.Delete(path);                                            // Android: 기존 동작 유지");
+                sb.AppendLine("                System.IO.FileInfo fi = new System.IO.FileInfo(path);");
+                sb.AppendLine("                bool win = Environment.OSVersion.Platform == PlatformID.Win32NT;");
+                sb.AppendLine("                if (fi.Exists && fi.Length > 31457280)   // 2026-11-01: 8MB → 30MB");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    if (win) ArchiveLog(dir, path, DateTime.Now.ToString(\"yyyyMMdd-HHmmss\"));   // 30MB 넘으면 시각 파일로 보관");
+                sb.AppendLine("                    else System.IO.File.Delete(path);                                              // Android: 기존 동작 유지");
                 sb.AppendLine("                }");
+                sb.AppendLine("                // 2026-11-01: 날짜가 바뀌면 하루치 보관 + 7일 지난 보관본 삭제 (하루 1회만 확인)");
+                sb.AppendLine("                if (win) MaintainLogDaily(dir, path);");
                 sb.AppendLine("                using (System.IO.StreamWriter w = System.IO.File.AppendText(path))");
                 sb.AppendLine("                    w.WriteLine(DateTime.Now.ToString(\"HH:mm:ss\") + \" \" + msg);");
+                sb.AppendLine("                _logFail = 0;");
+                sb.AppendLine("                }");
+                sb.AppendLine("                catch { _logFail++; if (_logFail >= 3) _logOff = true; }   // 3회 실패 → 이번 판은 파일 로그 끔");
                 sb.AppendLine("            }");
                 sb.AppendLine("        }");
                 sb.AppendLine();
-                sb.AppendLine("        // 2026-10-30: 회전 시 직전 로그를 .old 로 남긴다 (Windows 전용, NoInlining 분리)");
+                sb.AppendLine("        // 2026-11-01: 로그 경로 확정(1회) — Windows 는 %LOCALAPPDATA%\\WindBotAIEditor\\duel-log.txt,");
+                sb.AppendLine("        //   Android 는 ① <WindBot 폴더>\\duel-log.txt(폰 파일관리자에서 보임) ② 앱 전용 폴더 ③ 둘 다 실패하면 파일 로그 끔");
                 sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
-                sb.AppendLine("        private static void RotateLog(string path)");
+                sb.AppendLine("        private static string ResolveLogPath()");
                 sb.AppendLine("        {");
-                sb.AppendLine("            try { System.IO.File.Copy(path, path + \".old\", true); } catch { }");
+                sb.AppendLine("            if (_logPath != null) return _logPath;");
+                sb.AppendLine("            bool win = Environment.OSVersion.Platform == PlatformID.Win32NT;");
+                sb.AppendLine("            string asmDir = null;");
+                sb.AppendLine("            try { asmDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location); } catch { }");
+                sb.AppendLine("            string local = null;");
+                sb.AppendLine("            try { local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); } catch { }");
+                sb.AppendLine("            string[] cands = new string[3];");
+                sb.AppendLine("            int n = 0;");
+                sb.AppendLine("            if (asmDir != null && asmDir.Length > 0)   // 2026-11-01: Windows 도 WindBot 폴더를 먼저 시도");
+                sb.AppendLine("            {");
+                sb.AppendLine("                string root = System.IO.Path.GetDirectoryName(asmDir);   // …/Executors → WindBot 폴더");
+                sb.AppendLine("                if (root != null && root.Length > 0) cands[n++] = System.IO.Path.Combine(root, \"duel-log.txt\");");
+                sb.AppendLine("            }");
+                sb.AppendLine("            if (local != null && local.Length > 0)");
+                sb.AppendLine("                cands[n++] = System.IO.Path.Combine(System.IO.Path.Combine(local, \"WindBotAIEditor\"), \"duel-log.txt\");");
+                sb.AppendLine("            for (int i = 0; i < n; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                string p = cands[i];");
+                sb.AppendLine("                if (p == null || p.Length == 0) continue;");
+                sb.AppendLine("                try");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    string d = System.IO.Path.GetDirectoryName(p);");
+                sb.AppendLine("                    if (d != null && d.Length > 0 && !System.IO.Directory.Exists(d)) System.IO.Directory.CreateDirectory(d);");
+                sb.AppendLine("                    using (System.IO.StreamWriter t = System.IO.File.AppendText(p)) { }   // 쓰기 가능 확인");
+                sb.AppendLine("                    _logPath = p;");
+                sb.AppendLine("                    try { Console.WriteLine(\"[AI-EDITOR] log path = \" + p); } catch { }");
+                sb.AppendLine("                    return p;");
+                sb.AppendLine("                }");
+                sb.AppendLine("                catch { }");
+                sb.AppendLine("            }");
+                sb.AppendLine("            return null;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // 2026-11-01: 로그 보관 — duel-log-<yyyyMMdd>[-HHmmss].txt 로 남긴다 (7일 보관)");
+                sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
+                sb.AppendLine("        private static void ArchiveLog(string dir, string path, string stamp)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            try { System.IO.File.Copy(path, System.IO.Path.Combine(dir, \"duel-log-\" + stamp + \".txt\"), true); } catch { }");
                 sb.AppendLine("            try { System.IO.File.Delete(path); } catch { }");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // 날짜가 바뀌었으면 '어제' 파일을 날짜 이름으로 보관하고, 7일 지난 보관본을 지운다");
+                sb.AppendLine("        //   하루 1회만 실제 작업을 한다(_logMaintDay 캐시) — 로그 줄마다 디렉터리를 훑지 않는다");
+                sb.AppendLine("        private static int _logMaintDay = -1;");
+                sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
+                sb.AppendLine("        private static void MaintainLogDaily(string dir, string path)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            int today = DateTime.Now.Year * 400 + DateTime.Now.DayOfYear;");
+                sb.AppendLine("            if (today == _logMaintDay) return;");
+                sb.AppendLine("            _logMaintDay = today;");
+                sb.AppendLine("            try");
+                sb.AppendLine("            {");
+                sb.AppendLine("                System.IO.FileInfo fi = new System.IO.FileInfo(path);");
+                sb.AppendLine("                if (fi.Exists && fi.LastWriteTime.Date < DateTime.Now.Date)");
+                sb.AppendLine("                    ArchiveLog(dir, path, fi.LastWriteTime.ToString(\"yyyyMMdd\"));");
+                sb.AppendLine("            }");
+                sb.AppendLine("            catch { }");
+                sb.AppendLine("            PruneLogs(dir);");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // duel-log-<yyyyMMdd>*.txt 중 7일 지난 것 삭제 (파일명 비교 — DateTime 파싱 없음)");
+                sb.AppendLine("        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]");
+                sb.AppendLine("        private static void PruneLogs(string dir)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            try");
+                sb.AppendLine("            {");
+                sb.AppendLine("                string cutoff = DateTime.Now.AddDays(-7).ToString(\"yyyyMMdd\");");
+                sb.AppendLine("                string[] files = System.IO.Directory.GetFiles(dir, \"duel-log-*.txt\");");
+                sb.AppendLine("                for (int i = 0; i < files.Length; i++)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    string nm = System.IO.Path.GetFileName(files[i]);");
+                sb.AppendLine("                    if (nm == null || nm.Length < 17) continue;");
+                sb.AppendLine("                    if (string.CompareOrdinal(nm.Substring(9, 8), cutoff) < 0)");
+                sb.AppendLine("                    {");
+                sb.AppendLine("                        try { System.IO.File.Delete(files[i]); } catch { }");
+                sb.AppendLine("                    }");
+                sb.AppendLine("                }");
+                sb.AppendLine("            }");
+                sb.AppendLine("            catch { }");
                 sb.AppendLine("        }");
                 sb.AppendLine();
                 sb.AppendLine("        // 2026-10-30: 양쪽 필드(몬스터존)의 무효 카드 수 — IsDisabled() 가 실엔진 status(0x1) 를 읽는지 진단");
@@ -395,6 +497,53 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                + \" chain=[\" + chainStr + \"]\"   // B-34: 체인 목록");
             sb.AppendLine("                + \" -> \" + ids + StateStr());   // 2026-10-30: 상태(턴/페이즈/체인)");
                 sb.AppendLine("        }");
+
+                // 2026-11-01: 파괴 시도 결과 추적 — '파괴가 안 통한 카드'를 파괴 내성 후보로 남긴다
+                sb.AppendLine();
+                sb.AppendLine("        // 2026-11-01: 파괴 시도 추적 — 고른 카드가 체인 종료 후에도 필드에 있으면 '파괴 실패'로 기록");
+                sb.AppendLine("        //   앱이 duel-log 를 읽어 [파괴 내성 카드] 후보로 보여준다(자동 등록은 하지 않는다).");
+                sb.AppendLine("        private int _dTryId;");
+                sb.AppendLine("        private int _dTrySeq = -1;");
+                sb.AppendLine("        private string _dTryName = \"\";");
+                sb.AppendLine();
+                sb.AppendLine("        private void RememberDestroy(ClientCard c)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (c == null) { _dTryId = 0; return; }");
+                sb.AppendLine("            _dTryId = c.Id;");
+                sb.AppendLine("            _dTrySeq = c.Sequence;");
+                sb.AppendLine("            try { _dTryName = c.Name == null ? \"\" : c.Name; } catch { _dTryName = \"\"; }");
+                sb.AppendLine("            LogLine(\"[AI-EDITOR] destruct-try card=\" + _dTryId.ToString() + \" seq=\" + _dTrySeq.ToString() + \" name=\" + _dTryName + StateStr());");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        private static bool CardOnFieldNow(ClientField f, int id, int seq)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (f == null) return false;");
+                sb.AppendLine("            if (f.MonsterZone != null)");
+                sb.AppendLine("                for (int i = 0; i < f.MonsterZone.Length; i++)");
+                sb.AppendLine("                    if (f.MonsterZone[i] != null && f.MonsterZone[i].Id == id && f.MonsterZone[i].Sequence == seq) return true;");
+                sb.AppendLine("            if (f.SpellZone != null)");
+                sb.AppendLine("                for (int i = 0; i < f.SpellZone.Length; i++)");
+                sb.AppendLine("                    if (f.SpellZone[i] != null && f.SpellZone[i].Id == id && f.SpellZone[i].Sequence == seq) return true;");
+                sb.AppendLine("            return false;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        private void CheckDestroyResult()");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (_dTryId <= 0) return;");
+                sb.AppendLine("            bool still = CardOnFieldNow(Enemy, _dTryId, _dTrySeq) || CardOnFieldNow(Bot, _dTryId, _dTrySeq);");
+                sb.AppendLine("            if (still) LogLine(\"[AI-EDITOR] destruct-fail card=\" + _dTryId.ToString() + \" seq=\" + _dTrySeq.ToString() + \" name=\" + _dTryName + \"  → 파괴 내성 후보\");");
+                sb.AppendLine("            _dTryId = 0;");
+                sb.AppendLine("            _dTrySeq = -1;");
+                sb.AppendLine("            _dTryName = \"\";");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                sb.AppendLine("        // 체인 종료 시점에 '그 카드가 아직 필드에 있나'를 확인한다");
+                sb.AppendLine("        public override void OnChainEnd()");
+                sb.AppendLine("        {");
+                sb.AppendLine("            CheckDestroyResult();");
+                sb.AppendLine("            base.OnChainEnd();");
+                sb.AppendLine("        }");
+                sb.AppendLine();
             }
 
             if (!string.IsNullOrWhiteSpace(p.DialogFile))
@@ -583,7 +732,7 @@ namespace WindBotAIEditor.Services
             }
             // ---- 상태 필드 / OnChaining / OnNewTurn ----
             bool emitsSecondRoute = hasSecondRoute || secondUsesFirst;
-            if (opps.Count > 0 || hasAnyRoute || avoidColumnCard > 0)
+            if (opps.Count > 0 || hasAnyRoute || avoidColumnCard > 0 || needEffectUsed)
             {
                 sb.AppendLine();
                 foreach (var o in opps)
@@ -597,6 +746,11 @@ namespace WindBotAIEditor.Services
                 {
                     sb.AppendLine("        private int _routeSetSecond = -1;  // 후공: -1 미선택 / 0..N-1 / -2 없음(전개 안 함)");
                     sb.AppendLine("        private int _routeStepSecond = 0;  // 후공 단계 커서 (-1 = 이번 턴 전개 종료)");
+                }
+                if (needEffectUsed)
+                {
+                    sb.AppendLine("        // 2026-11-01: 이번 턴 효과를 발동한 **상대 몬스터** (카드ID|존) — 이미 효과를 쓴 몬스터에 뵐러/포영을 쓰지 않게 한다");
+                    sb.AppendLine("        private readonly List<long> _usedEffectKeys = new List<long>();");
                 }
                 sb.AppendLine();
 
@@ -643,7 +797,7 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        }");
                 sb.AppendLine();
             }
-                if (opps.Count > 0 || avoidColumnCard > 0)
+                if (opps.Count > 0 || avoidColumnCard > 0 || needEffectUsed)
                 {
                     sb.AppendLine("        public override void OnChaining(int player, ClientCard card)");
                     sb.AppendLine("        {");
@@ -664,12 +818,17 @@ namespace WindBotAIEditor.Services
                             sb.AppendLine("                LogLine(\"[AI-EDITOR] avoid-column col=\" + _avoidColumn.ToString() + \" who=\" + player.ToString() + \" turn=\" + _avoidTurn.ToString());");   // B-47: 파일 로그
                         sb.AppendLine("            }");
                     }
+                    if (needEffectUsed)
+                    {
+                        sb.AppendLine("            // 상대 **몬스터가 필드에서** 효과를 발동하면 기억한다(패/묘지 발동은 대상이 될 수 없으므로 제외)");
+                        sb.AppendLine("            if (card != null && card.Controller != 0 && card.Location == CardLocation.MonsterZone) MarkEffectUsed(card);");
+                    }
                     sb.AppendLine("            base.OnChaining(player, card);");
                     sb.AppendLine("        }");
                     sb.AppendLine();
                 }
 
-                if (opps.Count > 0 || hasAnyRoute)
+                if (opps.Count > 0 || hasAnyRoute || needEffectUsed)
                 {
                     sb.AppendLine("        public override void OnNewTurn()");
                     sb.AppendLine("        {");
@@ -685,6 +844,7 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            _routeSetSecond = -1;  // 후공 루트 다시 고르기");
                         sb.AppendLine("            _routeStepSecond = 0;  // 후공 루트 처음부터");
                     }
+                    if (needEffectUsed) sb.AppendLine("            _usedEffectKeys.Clear();   // 새 턴 — 효과 사용 기록 초기화");
                     sb.AppendLine("            base.OnNewTurn();");
                     sb.AppendLine("        }");
                 }
@@ -854,7 +1014,10 @@ namespace WindBotAIEditor.Services
 
                 bool isSelectCard = cb == "SelectCard";
                 bool needProtectFilter = protectExtra && Array.IndexOf(protectCbs, cb) >= 0;
-                bool needFilter = needProtectFilter
+                // 2026-11-01: 파괴 선택(hint=Destroy)에서 '파괴되지 않는 카드' 제외 (전역 옵션)
+                bool needDestructFilter = isSelectCard && p.SkipDestructImmuneOnDestroy;
+                bool needEffectImmuneFilter = isSelectCard && needEffectImmune;
+                bool needFilter = needDestructFilter || needEffectImmuneFilter || needProtectFilter
                                   || (isSelectCard && (forbidTarget.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0))
                                   || (!isSelectCard && needReleaseFilter);
                 if (rulesForCb.Count == 0 && !needFilter) continue;
@@ -867,6 +1030,7 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("        {");
                     sb.AppendLine("            IList<ClientCard> __picked = SelectCardCore(" + sig.BaseArgs + ");");
                     sb.AppendLine("            LogSelectCard(cards, min, max, hint, __picked);");
+                    sb.AppendLine("            if (hint == HintMsg.Destroy && __picked != null && __picked.Count > 0) RememberDestroy(__picked[0]);   // 2026-11-01: 파괴 결과 추적");
                     sb.AppendLine("            return __picked;");
                     sb.AppendLine("        }");
                     sb.AppendLine();
@@ -893,6 +1057,10 @@ namespace WindBotAIEditor.Services
                         else
                             sb.AppendLine("            allowedCards = FilterExtraRelease(allowedCards, min);   // B-16: 의식 릴리스 후보에서 엑스트라 덱 몬스터 제외");
                     }
+                    if (needDestructFilter)
+                        sb.AppendLine("            if (hint == HintMsg.Destroy) allowedCards = FilterDestructImmune(allowedCards, min);   // 2026-11-01: 파괴 선택에서 파괴 안 되는 카드 제외(전부 불가면 원본)");
+                    if (needEffectImmuneFilter)
+                        sb.AppendLine("            if (hint != HintMsg.Release) allowedCards = FilterEffectImmune(allowedCards, min);   // 2026-11-02: 효과 면역 카드 대상 제외(릴리스는 예외)");
                     if (isSelectCard)
                     {
                         if (forbidTarget.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0)
@@ -966,7 +1134,10 @@ namespace WindBotAIEditor.Services
                     }
 
                     // B-29: 내성 몬스터 제외 (WindBot 내장 목록) — 후보가 min 미만이면 이 규칙을 건너뛴다
-                    bool resistFilter = isSelectCard && c.SkipResistant;
+                    // 2026-11-01: 3상태(auto/on/off) + 전역 기본값 — off 면 전역이 켜져 있어도 제외하지 않는다
+                    bool resistFilter = isSelectCard
+                                        && (c.EffectiveResistantMode == "on"
+                                            || (c.EffectiveResistantMode != "off" && p.SkipResistantGlobal));
                     if (resistFilter)
                     {
                         ruleSrc = "rs" + (emitted + 1);
@@ -998,9 +1169,18 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterFaceUp(" + fuSrc + ");   // 앞면만");
                     }
 
+                    // 2026-11-01: 이번 턴 이미 효과를 사용한 상대 몬스터 제외 (뵐러/포영 대상 낭비 방지)
+                    bool effectUsedFilter = isSelectCard && c.SkipEffectUsed;
+                    if (effectUsedFilter)
+                    {
+                        string euSrc = (faceUpFilter || faceDownFilter || disabledFilter || resistFilter) ? ruleSrc : (xi > 0 ? "pool" + xi : srcList);
+                        ruleSrc = "eu" + (emitted + 1);
+                        sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterNotEffectUsed(" + euSrc + ");   // 이번 턴 효과 사용 몬스터 제외");
+                    }
+
                     var parts = new List<string>();
                     if (xi > 0) parts.Add("pool" + xi + ".Count >= min");                          // 후보 부족 → 다음 규칙
-                    if (resistFilter || disabledFilter || faceDownFilter || faceUpFilter) parts.Add(ruleSrc + ".Count >= min");   // 필터 후 부족 → 다음 규칙
+                    if (resistFilter || disabledFilter || faceDownFilter || faceUpFilter || effectUsedFilter) parts.Add(ruleSrc + ".Count >= min");   // 필터 후 부족 → 다음 규칙
                     if (c.WhenCard > 0)
                         parts.Add(WhenCardExpr(c.WhenCard));   // B-33: Card/ActivatingCard/체인 링크 모두 확인
                     var mc = maxCond(c);
@@ -1274,11 +1454,18 @@ namespace WindBotAIEditor.Services
             }
 
             bool needBest = allConds.Any(c => c.Kind == "enemyBestAttack" || c.Kind == "myBestAttack" || c.Kind == "bestAttackDiff");
+            bool needBestDefense = allConds.Any(c => c.Kind == "enemyBestDefense" || c.Kind == "bestAttackVsDefenseDiff");   // 2026-11-01
             bool needOnField = allConds.Any(c => c.Kind == "hasOnField") || triggers.Count > 0;
             bool needAttacking = allConds.Any(c => c.Kind == "enemyAttackingCount");
             bool needFaceUp = allConds.Any(c => c.Kind == "enemyFaceUpCount" || c.Kind == "myFaceUpCount");
             bool needFaceDown = allConds.Any(c => c.Kind == "enemyFaceDownCount" || c.Kind == "myFaceDownCount");
+            bool needFaceUpSpell = allConds.Any(c => c.Kind == "enemyFaceUpSpellCount");   // 2026-11-01
             bool needSetSpell = allConds.Any(c => c.Kind == "mySetCount");   // 2026-10-30
+            // 2026-11-01: 파괴 가능 몬스터 수 (파괴 내성만 제외)
+            bool needDestructible = allConds.Any(c => c.Kind == "enemyDestructibleCount" || c.Kind == "myDestructibleCount");
+            bool needFacedownCard = allConds.Any(c => c.Kind == "fieldHasFacedownCard" || c.Kind == "hasInHandOrSet");   // 2026-11-01
+            bool needHandOrSet = allConds.Any(c => c.Kind == "hasInHandOrSet");
+            bool needXyzMats = allConds.Any(c => c.Kind == "xyzMaterialAtLeast");   // 2026-11-01
             bool needLevel = allConds.Any(c => c.Kind == "fieldHasLevel");
             bool needLevelCount = allConds.Any(c => c.Kind == "fieldLevelCount");   // B-20
             bool needEmz = allConds.Any(c => c.Kind == "fieldCardInEmz");           // B-20
@@ -1302,7 +1489,10 @@ namespace WindBotAIEditor.Services
             bool needPick = listChoices.Count > 0;
 
             // B-29: 내성 몹 제외 필터가 필요한가 (SelectCard 규칙 중 skipResistant)
-            bool needResistFilter = choices.Any(c => c.On == "SelectCard" && c.SkipResistant);
+            // 2026-11-01: 전역 ON 이면 SelectCard 규칙 전부(off 제외), 전역 OFF 면 "on" 규칙만
+            bool needResistFilter = p.SkipResistantGlobal
+                ? choices.Any(c => c.On == "SelectCard" && c.EffectiveResistantMode != "off")
+                : choices.Any(c => c.On == "SelectCard" && c.EffectiveResistantMode == "on");
             // 2026-10-30: 효과 무효 카드 제외 필터가 필요한가 (SelectCard 규칙 중 skipDisabled)
             bool needDisabledFilter = choices.Any(c => c.On == "SelectCard" && c.SkipDisabled);
             // 2026-10-30: 뒷면 제외 / 앞면만 (skipFaceDown · onlyFaceUp)
@@ -1311,6 +1501,8 @@ namespace WindBotAIEditor.Services
             // 2026-10-30: 대상 기준 무효 판정 (chainLastDisabled / chainHasDisabled) — 쓰는 것만 배출
             bool needChainLastDisabled = allConds.Any(c => c.Kind == "chainLastDisabled");
             bool needChainHasDisabled = allConds.Any(c => c.Kind == "chainHasDisabled");
+            // 2026-11-01: 체인 마지막 = 상대 필드 몬스터 판정 (뵐러/포영 게이트)
+            bool needChainLastMonster = allConds.Any(c => c.Kind == "chainLastEnemyFieldMonster");
 
             sb.AppendLine();
             if (needBest) sb.Append(StaticHelper("BestAttack", "int", "ClientField f",
@@ -1319,6 +1511,16 @@ namespace WindBotAIEditor.Services
                 "            {",
                 "                ClientCard c = f.MonsterZone[i];",
                 "                if (c != null && c.Attack > best) best = c.Attack;",
+                "            }",
+                "            return best;"));
+
+            // 2026-11-01: 최고 수비력 — **수비 표시 몬스터만** 센다. 공격 표시의 DEF 를 쓰면 오탐(이길 수 있는데 못 뚫는다고 판단)
+            if (needBestDefense) sb.Append(StaticHelper("BestDefense", "int", "ClientField f",
+                "            int best = 0;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c != null && c.IsDefense() && c.Defense > best) best = c.Defense;   // 수비 표시만",
                 "            }",
                 "            return best;"));
 
@@ -1359,6 +1561,17 @@ namespace WindBotAIEditor.Services
                 "            }",
                 "            return n;"));
 
+            // 2026-11-01: 앞면 마법/함정 수(지속·필드·장착) — 마함존만, 앞면(0x5)
+            if (needFaceUpSpell) sb.Append(StaticHelper("CountFaceUpSpell", "int", "ClientField f",
+                "            int n = 0;",
+                "            if (f == null || f.SpellZone == null) return 0;",
+                "            for (int i = 0; i < f.SpellZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.SpellZone[i];",
+                "                if (c != null && ((int)c.Position & 0x5) != 0) n++;   // 앞면",
+                "            }",
+                "            return n;"));
+
             // 2026-10-30: 세트(뒷면) 마법/함정 수 — CountFaceDown 은 몬스터존까지 세므로 따로 둔다
             if (needSetSpell) sb.Append(StaticHelper("CountSetSpell", "int", "ClientField f",
                 "            int n = 0;",
@@ -1369,6 +1582,100 @@ namespace WindBotAIEditor.Services
                 "                if (c != null && ((int)c.Position & 0xA) != 0) n++;   // 뒷면(세트)",
                 "            }",
                 "            return n;"));
+
+            // 2026-11-01: 파괴 가능한 몬스터 수 — '파괴 내성'(IsMonsterInvincible)만 제외한다.
+            //   대상 내성(IsShouldNotBeTarget)과는 별개: 파괴는 대상 지정이 아니므로 내성 종류가 다르다.
+            //   IsMonsterInvincible 은 Controller 로 목록이 갈리므로(내=A/Bot, 상대=Enemy) 필드와 카드가 일치해야 정확하다.
+            // 2026-11-01: 카드 효과로 파괴 불가 — WindBot 내장 목록 + **사용자 목록**(DestructibleImmuneCards)
+            if (needEffectImmune) EmitEffectImmuneHelper(sb, p);   // 2026-11-02: 효과 면역 카드 대상 제외
+            if (needNegateVsImmune) EmitNegateVsImmuneHelper(sb, p);   // 2026-11-02: 무효화 카드 발동 차단
+            if (needDestroyVsImmune) EmitDestroyVsImmuneHelper(sb, p);   // 2026-11-02: 파괴 카드 발동 차단
+
+            if (needDestructible || p.SkipDestructImmuneOnDestroy || needDestroyVsImmune)
+            {
+                var immuneIds = new List<int>();
+                foreach (var iid in (p.DestructibleImmuneCards ?? new List<int>()))
+                    foreach (var aid in AliasIds(iid))
+                        if (!immuneIds.Contains(aid)) immuneIds.Add(aid);
+
+                sb.AppendLine("        // 2026-11-01: 카드 효과로 파괴 불가 (WindBot 내장 + 사용자 목록)");
+                sb.AppendLine("        private static bool IsDestructionImmune(ClientCard c)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (c == null) return false;");
+                sb.AppendLine("            if (c.IsMonsterInvincible()) return true;");
+                if (immuneIds.Count > 0)
+                    sb.AppendLine("            return " + string.Join(" || ", immuneIds.Select(x => "c.IsCode(" + x + ")").ToArray()) + ";");
+                else
+                    sb.AppendLine("            return false;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+
+                if (needDestructible) sb.Append(StaticHelper("CountDestructible", "int", "ClientField f",
+                    "            int n = 0;",
+                    "            if (f == null || f.MonsterZone == null) return 0;",
+                    "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                    "            {",
+                    "                ClientCard c = f.MonsterZone[i];",
+                    "                if (c == null) continue;",
+                    "                if (IsDestructionImmune(c)) continue;   // 내장 + 사용자 목록",
+                    "                n++;",
+                    "            }",
+                    "            return n;"));
+
+                if (p.SkipDestructImmuneOnDestroy)
+                {
+                    sb.AppendLine("        // 2026-11-01: 파괴 선택(hint=Destroy)에서 '파괴되지 않는 카드' 제외 — 전부 불가면 원본 유지(엔진 최소 선택 보장)");
+                    sb.AppendLine("        private static IList<ClientCard> FilterDestructImmune(IList<ClientCard> cards, int min)");
+                    sb.AppendLine("        {");
+                    sb.AppendLine("            if (cards == null) return cards;");
+                    sb.AppendLine("            List<ClientCard> keep = new List<ClientCard>();");
+                    sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                ClientCard c = cards[i];");
+                    sb.AppendLine("                if (c == null) continue;");
+                    sb.AppendLine("                if (IsDestructionImmune(c)) continue;");
+                    sb.AppendLine("                keep.Add(c);");
+                    sb.AppendLine("            }");
+                    sb.AppendLine("            if (keep.Count < min || keep.Count == 0) return cards;   // 파괴 불가뿐 → 원본(최소 선택 보장)");
+                    if (p.DebugEffectLog)
+                        sb.AppendLine("            if (keep.Count != cards.Count) LogLine(\"[AI-EDITOR] destruct-immune before=\" + cards.Count.ToString() + \" after=\" + keep.Count.ToString());");
+                    sb.AppendLine("            return keep;");
+                    sb.AppendLine("        }");
+                    sb.AppendLine();
+                }
+            }
+
+            // 2026-11-01: 필드에 **뒷면(세트)** 으로 있는 특정 카드 — hasOnField 는 앞/뒤면을 구분하지 않는다.
+            //   예: "패에 반짝임이 있거나 필드에 세트된 반짝임이 있으면" 같은 조건.
+            if (needFacedownCard) sb.Append(StaticHelper("FieldHasFacedownCard", "bool", "ClientField f, int code",
+                "            if (f == null) return false;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c != null && c.IsCode(code) && c.IsFacedown()) return true;",
+                "            }",
+                "            for (int i = 0; i < f.SpellZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.SpellZone[i];",
+                "                if (c != null && c.IsCode(code) && c.IsFacedown()) return true;",
+                "            }",
+                "            return false;"));
+
+            if (needHandOrSet) sb.Append(StaticHelper("HasInHandOrSet", "bool", "ClientField f, int code",
+                "            if (f == null) return false;",
+                "            if (f.HasInHand(code)) return true;",
+                "            return FieldHasFacedownCard(f, code);"));
+
+            // 2026-11-01: 필드의 특정 엑시즈가 소재 N개 이상인지 (갤럭시 라인: 안티매터 = 소재 3+)
+            if (needXyzMats) sb.Append(StaticHelper("XyzMaterialAtLeast", "bool", "ClientField f, int code, int n",
+                "            if (f == null || f.MonsterZone == null) return false;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c == null || !c.IsCode(code)) continue;",
+                "                if (c.Overlays != null && c.Overlays.Count >= n) return true;",
+                "            }",
+                "            return false;"));
 
             if (needOnField) sb.Append(StaticHelper("OnField", "bool", "ClientField f, int code",
                 "            for (int i = 0; i < f.MonsterZone.Length; i++)",
@@ -1488,10 +1795,12 @@ namespace WindBotAIEditor.Services
                 "            }",
                 "            return false;"));
             if (needSetcode) EmitHasSetcodeHelper(sb);
-            if (needResistFilter) EmitResistFilterHelper(sb);
+            if (needResistFilter) EmitResistFilterHelper(sb, p.DebugEffectLog);
             if (needDisabledFilter) EmitDisabledFilterHelper(sb, p.DebugEffectLog);
             if (needFaceDownFilter || needFaceUpFilter) EmitFaceFilterHelpers(sb, needFaceDownFilter, needFaceUpFilter, p.DebugEffectLog);   // 2026-10-30
+            if (needEffectUsed) EmitEffectUsedHelpers(sb, p.DebugEffectLog);   // 2026-11-01: 이번 턴 효과 사용 몬스터
             if (needChainLastDisabled || needChainHasDisabled) EmitChainDisabledHelpers(sb, needChainLastDisabled, needChainHasDisabled);   // 2026-10-30
+            if (needChainLastMonster) EmitChainLastMonsterHelper(sb);   // 2026-11-01: 체인 마지막 = 상대 필드 몬스터
             if (needPick) EmitAttackTargetHelper(sb);   // B-35: 공격 대상 기본 정책
             if (needTheme) EmitThemeHelpers(sb, needThemeMonster);
             if (needThemeExcept) EmitThemeExceptHelpers(sb);   // B-32
@@ -1829,17 +2138,38 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine();
             }
 
-            if (effectBlocks.Count > 0)
+            if (effectBlocks.Count > 0 || needNegateVsImmune || needDestroyVsImmune)
             {
                 sb.AppendLine("        // 특정 효과 발동 금지 (효과번호/턴)");
                 sb.AppendLine("        private bool IsForbiddenEffect(ClientCard card, long desc)");
                 sb.AppendLine("        {");
                 sb.AppendLine("            if (card == null) return false;");
+                if (needNegateVsImmune)
+                {
+                    sb.AppendLine("            // 2026-11-02: 무효화 카드(뵐러/포영)가 효과 면역 카드의 효과에 체인 → 아무 효과 없음 → 발동 금지");
+                    sb.AppendLine("            if (NegateVsEffectImmune(card))");
+                    sb.AppendLine("            {");
+                    if (p.DebugEffectLog) sb.AppendLine("                LogForbid(\"negate-immune\", card);");
+                    sb.AppendLine("                return true;");
+                    sb.AppendLine("            }");
+                }
+                if (needDestroyVsImmune)
+                {
+                    sb.AppendLine("            // 2026-11-02: 파괴 카드(유령토끼 등)가 파괴 내성 카드의 효과에 체인 → 파괴 무효 → 발동 금지");
+                    sb.AppendLine("            if (DestroyVsImmune(card))");
+                    sb.AppendLine("            {");
+                    if (p.DebugEffectLog) sb.AppendLine("                LogForbid(\"destroy-immune\", card);");
+                    sb.AppendLine("                return true;");
+                    sb.AppendLine("            }");
+                }
                 foreach (var f in effectBlocks)
                 {
                     var parts = new List<string> { IsCodeOr("card", f.Card) };
                     if (f.EffectDesc >= 0) parts.Add($"desc == {f.EffectDesc}");
                     parts.Add(TurnExpr(f));
+                    // 2026-11-01: 조건 지원 — deny = "조건 충족 시 차단", allow = "조건은 예외(충족하면 허용)"
+                    var exc2 = ExceptionExpr(f);
+                    if (exc2 != null) parts.Add(IsDeny(f) ? "(" + exc2 + ")" : "!(" + exc2 + ")");
                     sb.AppendLine("            if (" + string.Join(" && ", parts) + ") return true;");
                 }
                 sb.AppendLine("            return false;");
@@ -2079,6 +2409,10 @@ namespace WindBotAIEditor.Services
             foreach (var f in rules)
             {
                 var expr = cond(f);
+                // 2026-11-01: ③ 금지의 '효과번호' — 발동 금지(IsForbiddenActivate)에서만 의미가 있다.
+                //   같은 카드의 여러 효과 중 하나만 막을 때 쓴다(예: 라피 e1/e2 는 허용, e3 만 조건부 금지).
+                if (name == "IsForbiddenActivate" && f.EffectDesc >= 0)
+                    expr += " && ActivateDescription == " + f.EffectDesc;
                 if (withTurn) expr += " && (" + TurnExpr(f) + ")";
                 var exc = ExceptionExpr(f);
                 if (exc != null) expr += IsDeny(f) ? " && (" + exc + ")" : " && !(" + exc + ")";
@@ -2122,6 +2456,175 @@ namespace WindBotAIEditor.Services
         /// 2026-10-30: 효과가 무효된 카드 제외 필터(`ClientCard.IsDisabled()`).
         /// 실행기 73개에서 349회 사용된 판정으로, 이미 무효된 몬스터에 자원을 쓰지 않게 한다.
         /// </summary>
+        /// <summary>
+        /// 2026-11-02: **파괴 카드**(유령토끼 등)가 '파괴 내성 카드'의 효과에 체인하는 상황인가.
+        /// 목록에 있는 파괴 카드만 막는다.
+        /// </summary>
+        private static void EmitDestroyVsImmuneHelper(StringBuilder sb, AiProfile p)
+        {
+            var ids = new List<int>();
+            foreach (var did in (p.DestroyCardIds ?? new List<int>()))
+                foreach (var aid in AliasIds(did))
+                    if (!ids.Contains(aid)) ids.Add(aid);
+
+            sb.AppendLine("        // 2026-11-02: 파괴 카드(목록)가 파괴 내성 카드의 효과에 체인하는지 — 발동 낭비 방지");
+            sb.AppendLine("        private bool DestroyVsImmune(ClientCard card)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (card == null) return false;");
+            sb.AppendLine("            if (!(" + string.Join(" || ", ids.Select(x => "card.IsCode(" + x + ")").ToArray()) + ")) return false;");
+            sb.AppendLine("            if (Duel.CurrentChain == null || Duel.CurrentChain.Count == 0) return false;");
+            sb.AppendLine("            ClientCard last = Duel.CurrentChain[Duel.CurrentChain.Count - 1];");
+            sb.AppendLine("            return IsDestructionImmune(last);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// 2026-11-02: **무효화 카드**가 '효과 면역 카드'의 효과에 체인하는 상황인가.
+        /// 목록(뵐러/포영)에 있는 카드만 막는다 — 노모어벳처럼 정당한 체인은 통과시킨다.
+        /// </summary>
+        private static void EmitNegateVsImmuneHelper(StringBuilder sb, AiProfile p)
+        {
+            var negs = new List<int>();
+            foreach (var nid in (p.NegateCardIds ?? new List<int>()))
+                foreach (var aid in AliasIds(nid))
+                    if (!negs.Contains(aid)) negs.Add(aid);
+
+            sb.AppendLine("        // 2026-11-02: 무효화 카드(목록)가 효과 면역 카드의 효과에 체인하는지 — 단일 후보(n=1) 낭비 방지");
+            sb.AppendLine("        private bool NegateVsEffectImmune(ClientCard card)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (card == null) return false;");
+            sb.AppendLine("            if (!(" + string.Join(" || ", negs.Select(x => "card.IsCode(" + x + ")").ToArray()) + ")) return false;");
+            sb.AppendLine("            if (Duel.CurrentChain == null || Duel.CurrentChain.Count == 0) return false;");
+            sb.AppendLine("            ClientCard last = Duel.CurrentChain[Duel.CurrentChain.Count - 1];");
+            sb.AppendLine("            return IsEffectImmune(last);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// 2026-11-02: '효과를 받지 않는 카드' 목록으로 대상 후보를 거른다(릴리스는 호출부에서 제외).
+        /// 전부 걸러지면 **원본 유지**(엔진이 요구한 최소 선택 수 보장).
+        /// </summary>
+        private static void EmitEffectImmuneHelper(StringBuilder sb, AiProfile p)
+        {
+            var ids = new List<int>();
+            foreach (var iid in (p.EffectImmuneCards ?? new List<int>()))
+                foreach (var aid in AliasIds(iid))
+                    if (!ids.Contains(aid)) ids.Add(aid);
+
+            sb.AppendLine("        // 2026-11-02: 효과를 받지 않는 카드(목록) — 대상 선택에서 제외. 릴리스(hint=Release)에는 쓰지 않는다");
+            sb.AppendLine("        private static bool IsEffectImmune(ClientCard c)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (c == null) return false;");
+            sb.AppendLine("            return " + string.Join(" || ", ids.Select(x => "c.IsCode(" + x + ")").ToArray()) + ";");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private static IList<ClientCard> FilterEffectImmune(IList<ClientCard> cards, int min)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (cards == null) return cards;");
+            sb.AppendLine("            List<ClientCard> keep = new List<ClientCard>();");
+            sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = cards[i];");
+            sb.AppendLine("                if (c == null) continue;");
+            sb.AppendLine("                if (IsEffectImmune(c)) continue;");
+            sb.AppendLine("                keep.Add(c);");
+            sb.AppendLine("            }");
+            sb.AppendLine("            if (keep.Count < min || keep.Count == 0) return cards;   // 남는 후보가 없으면 원본(최소 선택 보장)");
+            if (p.DebugEffectLog)
+                sb.AppendLine("            if (keep.Count != cards.Count) LogLine(\"[AI-EDITOR] effect-immune before=\" + cards.Count.ToString() + \" after=\" + keep.Count.ToString());");
+            sb.AppendLine("            return keep;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// 2026-11-01: `enemyUnusedEffectCount` 조건 또는 ② `skipEffectUsed` 필터를 쓰는가.
+        /// (상태 필드/OnChaining 를 조기에 배출해야 해서 Generate 초반에 계산한다)
+        /// </summary>
+        private static bool UsesEffectUsed(AiProfile p, List<ChoiceRule> choices, List<RouteSet> firstSets, List<RouteSet> secondSets)
+        {
+            foreach (var ch in choices)
+            {
+                if (ch.On == "SelectCard" && ch.SkipEffectUsed) return true;
+                if ((ch.Conditions ?? new List<Condition>()).Any(x => x.Kind == "enemyUnusedEffectCount")) return true;
+            }
+            foreach (var a in p.Actions ?? new List<ActionRule>())
+                if ((a.Conditions ?? new List<Condition>()).Any(x => x.Kind == "enemyUnusedEffectCount")) return true;
+            foreach (var f in p.Forbids ?? new List<ForbidRule>())
+                if ((f.Conditions ?? new List<Condition>()).Any(x => x.Kind == "enemyUnusedEffectCount")) return true;
+            foreach (var set in firstSets.Concat(secondSets))
+            {
+                if ((set.Conditions ?? new List<Condition>()).Any(x => x.Kind == "enemyUnusedEffectCount")) return true;
+                foreach (var st in RouteSteps(set))
+                    foreach (var o in OptionsOf(st))
+                        if ((o.Conditions ?? new List<Condition>()).Any(x => x.Kind == "enemyUnusedEffectCount")) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 2026-11-01: "이번 턴 효과를 사용한 상대 몬스터" 추적 헬퍼.
+        /// <para>뵐러/포영은 **지금 효과를 낼 수 있는 몬스터**에게 써야 한다. 이미 효과를 쓴 몬스터에게 날리면 낭비이므로
+        /// `OnChaining` 에서 기록한 (카드ID|존) 목록으로 후보를 거른다. 기록은 매 턴 `OnNewTurn` 에서 초기화.</para>
+        /// </summary>
+        private static void EmitEffectUsedHelpers(StringBuilder sb, bool debugLog)
+        {
+            sb.AppendLine("        // 2026-11-01: 이번 턴 효과를 사용한 상대 몬스터 — (카드ID|존) 키");
+            sb.AppendLine("        private static long EffectKey(ClientCard c)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (c == null) return -1;");
+            sb.AppendLine("            return ((long)c.Id * 256L) + (long)(c.Sequence & 0xFF);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private void MarkEffectUsed(ClientCard c)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            long key = EffectKey(c);");
+            sb.AppendLine("            if (key < 0) return;");
+            sb.AppendLine("            if (!_usedEffectKeys.Contains(key)) _usedEffectKeys.Add(key);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private bool UsedEffect(ClientCard c)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            long key = EffectKey(c);");
+            sb.AppendLine("            if (key < 0) return false;");
+            sb.AppendLine("            return _usedEffectKeys.Contains(key);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        // 이번 턴 효과를 아직 발동하지 않은 몬스터 수 (조건 enemyUnusedEffectCount)");
+            sb.AppendLine("        private int CountUnusedEffect(ClientField f)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (f == null || f.MonsterZone == null) return 0;");
+            sb.AppendLine("            int n = 0;");
+            sb.AppendLine("            for (int i = 0; i < f.MonsterZone.Length; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = f.MonsterZone[i];");
+            sb.AppendLine("                if (c == null) continue;");
+            sb.AppendLine("                if (UsedEffect(c)) continue;");
+            sb.AppendLine("                n++;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return n;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        // ② skipEffectUsed — 이번 턴 효과를 사용한 몬스터 제외");
+            sb.AppendLine("        private IList<ClientCard> FilterNotEffectUsed(IList<ClientCard> cards)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            IList<ClientCard> result = new List<ClientCard>();");
+            sb.AppendLine("            if (cards == null) return result;");
+            sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = cards[i];");
+            sb.AppendLine("                if (c == null) continue;");
+            sb.AppendLine("                if (UsedEffect(c)) continue;");
+            sb.AppendLine("                result.Add(c);");
+            sb.AppendLine("            }");
+            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipEffectUsed before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+            sb.AppendLine("            return result;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
         private static void EmitDisabledFilterHelper(StringBuilder sb, bool debugLog)
         {
             sb.AppendLine("        // 2026-10-30: 효과 무효 카드 제외 — IsDisabled()");
@@ -2181,6 +2684,25 @@ namespace WindBotAIEditor.Services
         /// 2026-10-30: 표시 상태 필터 — 뒷면 제외(`skipFaceDown`) / 앞면만(`onlyFaceUp`).
         /// `FilterNotDisabled` 와 같은 규칙: 제거 후 후보가 `min` 미만이면 그 규칙을 건너뛴다(억지 선택 금지).
         /// </summary>
+        /// <summary>
+        /// 2026-11-01: 체인 마지막 링크가 **상대 필드의 몬스터**인가.
+        /// 뵐러/무한포영은 "앞면 몬스터의 효과를 무효화"하는 카드라, **패·묘지에서 발동한 효과에 체인하면 아무것도 못 막는다**.
+        /// 리플레이 `2026-11-01 21-58-42.yrpX`: 패에서 발동한 효과(101403001)에 뵐러를 체인해 카드만 버렸다.
+        /// </summary>
+        private static void EmitChainLastMonsterHelper(StringBuilder sb)
+        {
+            sb.AppendLine("        // 2026-11-01: 체인 마지막 링크가 상대 **필드 몬스터**인가 (패/묘지 발동이면 false)");
+            sb.AppendLine("        private bool ChainLastEnemyFieldMonster()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (Duel.CurrentChain == null || Duel.CurrentChain.Count == 0) return false;");
+            sb.AppendLine("            ClientCard c = Duel.CurrentChain[Duel.CurrentChain.Count - 1];");
+            sb.AppendLine("            if (c == null) return false;");
+            sb.AppendLine("            if (c.Controller == 0) return false;   // 내 카드는 대상이 아니다");
+            sb.AppendLine("            return c.Location == CardLocation.MonsterZone;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
         private static void EmitFaceFilterHelpers(StringBuilder sb, bool withNotFaceDown, bool withFaceUpOnly, bool debugLog)
         {
             if (withNotFaceDown)
@@ -2228,7 +2750,7 @@ namespace WindBotAIEditor.Services
         /// 몬스터: IsMonsterInvincible / IsShouldNotBeTarget / IsShouldNotBeMonsterTarget
         /// 마함: IsShouldNotBeSpellTrapTarget
         /// </summary>
-        private static void EmitResistFilterHelper(StringBuilder sb)
+        private static void EmitResistFilterHelper(StringBuilder sb, bool debugLog)
         {
             sb.AppendLine("        // B-29: 내성 몹(대상/효과 보호) 제외 — WindBot 내장 목록 사용");
             sb.AppendLine("        private static IList<ClientCard> FilterResistant(IList<ClientCard> cards)");
@@ -2249,6 +2771,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                }");
             sb.AppendLine("                result.Add(c);");
             sb.AppendLine("            }");
+            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipResistant before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -3097,19 +3620,56 @@ namespace WindBotAIEditor.Services
         }
 
         /// <summary>B-14: 조건 부정(Not)을 식 전체에 적용</summary>
+        /// <summary>
+        /// 2026-11-01: UI 미리보기용 — 조건 목록이 실제로 어떤 C# 식이 되는지 문자열로 돌려준다.
+        /// 그룹(괄호)이 의도대로 묶였는지 화면에서 바로 확인할 때 쓴다.
+        /// </summary>
+        public static string PreviewConditions(IEnumerable<Condition> conds)
+        {
+            if (conds == null) return "true";
+            return ConditionExpression(new List<Condition>(conds));
+        }
         private static string ConditionExpression(List<Condition> conds)
         {
-            string acc = null;
+            // 2026-11-01: 그룹(괄호) 지원 — 같은 Group 끼리 먼저 결합하고, 그룹 사이는 그룹 첫 조건의 Join 으로 연결.
+            //   Group 이 모두 0 이면 아래 결과는 기존과 **완전히 동일**하다(좌결합).
+            string acc = null;          // 완료된 그룹들의 누적식
+            string groupAcc = null;     // 진행 중인 그룹 내부식
+            int curGroup = 0;
+            string groupOp = "&&";      // 이 그룹을 이전 누적식과 연결하는 연산자
+            bool started = false;
+
             foreach (var c in conds)
             {
                 var text = ConditionText(c);
                 if (string.IsNullOrWhiteSpace(text)) continue;
                 if (c.Not) text = "!(" + text + ")";   // B-14: 부정
-                if (acc == null) { acc = text; continue; }
-                var op = string.Equals(c.Join, "or", StringComparison.OrdinalIgnoreCase) ? "||" : "&&";
-                acc = "(" + acc + " " + op + " " + text + ")";
+
+                if (!started)
+                {
+                    started = true;
+                    curGroup = c.Group;
+                    groupAcc = text;
+                    continue;
+                }
+
+                if (c.Group == curGroup)
+                {
+                    var op = string.Equals(c.Join, "or", StringComparison.OrdinalIgnoreCase) ? "||" : "&&";
+                    groupAcc = "(" + groupAcc + " " + op + " " + text + ")";
+                    continue;
+                }
+
+                // 그룹 경계: 지금까지 그룹을 누적하고 새 그룹 시작
+                acc = acc == null ? groupAcc : "(" + acc + " " + groupOp + " " + groupAcc + ")";
+                curGroup = c.Group;
+                groupOp = string.Equals(c.Join, "or", StringComparison.OrdinalIgnoreCase) ? "||" : "&&";
+                groupAcc = text;
             }
-            return acc == null ? "true" : acc;
+
+            if (!started) return "true";
+            acc = acc == null ? groupAcc : "(" + acc + " " + groupOp + " " + groupAcc + ")";
+            return acc;
         }
 
         /// <summary>조건의 대상 필드 식 (me → Bot, 그 외 → Enemy)</summary>
@@ -3157,7 +3717,9 @@ namespace WindBotAIEditor.Services
                 case "enemyHandCount": return $"Enemy.GetHandCount() {c.Op} {c.Value}";
                 case "enemyAttackingCount": return $"CountAttacking(Enemy) {c.Op} {c.Value}";
                 case "enemyFaceUpCount": return $"CountFaceUp(Enemy) {c.Op} {c.Value}";
+            case "enemyUnusedEffectCount": return $"CountUnusedEffect(Enemy) {c.Op} {c.Value}";   // 2026-11-01
                 case "enemyFaceDownCount": return $"CountFaceDown(Enemy) {c.Op} {c.Value}";
+                case "enemyFaceUpSpellCount": return $"CountFaceUpSpell(Enemy) {c.Op} {c.Value}";   // 2026-11-01
                 case "myMonsterCount": return $"Bot.GetMonsterCount() {c.Op} {c.Value}";
                 case "myHandCount": return $"Bot.GetHandCount() {c.Op} {c.Value}";
                 case "myLp": return $"Bot.LifePoints {c.Op} {c.Value}";
@@ -3200,6 +3762,8 @@ namespace WindBotAIEditor.Services
                 // 2026-10-30: 대상 기준 무효 판정 — 체인 마지막(= 응답 대상) / 체인 전체
                 case "chainLastDisabled": return "ChainLastDisabled()";
                 case "chainHasDisabled": return "ChainHasDisabled()";
+                // 2026-11-01: 체인 마지막 링크가 상대 필드 몬스터인가 (뵐러/포영은 이때만 무효화가 의미 있다)
+                case "chainLastEnemyFieldMonster": return "ChainLastEnemyFieldMonster()";
                 // 2026-10-30: 필드/자원 수치 + 이 카드의 표시 상태
                 case "myFaceUpCount": return $"CountFaceUp(Bot) {c.Op} {c.Value}";
                 case "myFaceDownCount": return $"CountFaceDown(Bot) {c.Op} {c.Value}";
@@ -3210,9 +3774,20 @@ namespace WindBotAIEditor.Services
                 case "deckCount": return $"Bot.Deck.Count {c.Op} {c.Value}";
                 case "extraCount": return $"Bot.ExtraDeck.Count {c.Op} {c.Value}";
                 case "bestAttackDiff": return $"(BestAttack(Bot) - BestAttack(Enemy)) {c.Op} {c.Value}";
+                // 2026-11-01: 수비 표시 대응
+                case "enemyBestDefense": return $"BestDefense(Enemy) {c.Op} {c.Value}";
+                case "bestAttackVsDefenseDiff": return $"(BestAttack(Bot) - BestDefense(Enemy)) {c.Op} {c.Value}";
                 case "cardIsFaceup": return "(Card != null && Card.IsFaceup())";
                 case "cardIsFacedown": return "(Card != null && Card.IsFacedown())";
                 case "cardIsDefense": return "(Card != null && Card.IsDefense())";
+                // 2026-11-01: 파괴 효과 판단 — 파괴 내성(IsMonsterInvincible)만 제외한 수
+                case "enemyDestructibleCount": return $"CountDestructible(Enemy) {c.Op} {c.Value}";
+                case "myDestructibleCount": return $"CountDestructible(Bot) {c.Op} {c.Value}";
+                // 2026-11-01: 필드에 뒷면(세트)인 특정 카드 — hasOnField(앞/뒤면 무구분) 보완
+                case "fieldHasFacedownCard": return CallOr(x => "FieldHasFacedownCard(" + SideExpr(c) + ", " + x + ")", c.Card);
+                case "hasInHandOrSet": return CallOr(x => "HasInHandOrSet(" + SideExpr(c) + ", " + x + ")", c.Card);
+                // 2026-11-01: 그 엑시즈가 소재 N개 이상 (ClientCard.Overlays = List<int>)
+                case "xyzMaterialAtLeast": return CallOr(x => "XyzMaterialAtLeast(" + SideExpr(c) + ", " + x + ", " + Math.Max(1, c.Value) + ")", c.Card);
                 case "amFirst": return "Duel.IsFirst";
                 case "amSecond": return "!Duel.IsFirst";
                 case "fieldHasTheme": return ThemeCond(c, c.MonsterOnly
@@ -3241,6 +3816,16 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
