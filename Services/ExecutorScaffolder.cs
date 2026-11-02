@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -56,6 +56,11 @@ namespace WindBotAIEditor.Services
             }
 
             // ---- 클래스 본문 ----
+            // 2026-11-02 (B-70): **블록 주석 제거** — 주석 안의 AddExecutor/멤버를 실행 코드로 착각해
+            //   존재하지 않는 심볼(주석 처리된 CardId 등)을 참조하는 사고를 막는다(줄 수는 보존).
+            text = Regex.Replace(text, @"/\*.*?\*/", m => new string('\n', m.Value.Count(ch => ch == '\n')),
+                                 RegexOptions.Singleline);
+
             var mcls = Regex.Match(text, @"(?:public\s+|internal\s+|private\s+)?class\s+(?<cls>\w+)\s*:\s*DefaultExecutor");
             if (!mcls.Success) { r.Log.Add("DefaultExecutor 상속 클래스를 찾지 못했습니다"); return r; }
             var cls = mcls.Groups["cls"].Value;
@@ -201,6 +206,19 @@ namespace WindBotAIEditor.Services
 
             p.RawMembers = string.Join("\n\n", kept.Select(x => x.Trim()).ToArray());
 
+            // 2026-11-02 (B-70): 신버전 실행기를 구버전에서 돌리기 위한 **호환 변환**
+            //   · Callback → `...New` (구버전 시그니처는 CompatDefaultExecutor 가 다리 역할)
+            //   · 신버전 전용 API → CompatShim 확장 호출
+            p.CompatBase = true;
+            // #region/#endregion 은 멤버를 잘라내면 짝이 맞지 않아 컴파일 오류가 된다 → 제거
+            p.RawMembers = Regex.Replace(p.RawMembers, @"(?m)^\s*#(region|endregion).*\r?\n", "");
+            p.RawMembers = Compatize(p.RawMembers);
+            foreach (var a in p.Actions)
+                if (a.RawBody.Length > 0) a.RawBody = Compatize(a.RawBody);
+
+            r.Log.Add("호환 모드(B-70): CompatDefaultExecutor 상속 · 콜백 " +
+                      (p.RawMembers.Contains("OnSelectCardNew") ? "원본 유지" : "없음"));
+
             if (skipped > 0) r.Log.Add("건너뛴 실행기: " + skipped + "개 (카드ID 미확인)");
             r.Log.Add("행동 " + p.Actions.Count + "개 · RawBody " + p.Actions.Count(a => a.RawBody.Length > 0) + "개 · RawMembers " +
                       (p.RawMembers.Length > 0 ? "있음" : "없음") + " · using +" + usings.Count);
@@ -209,6 +227,60 @@ namespace WindBotAIEditor.Services
         }
 
         // ---------------- helpers ----------------
+
+        private static readonly (string From, string To)[] CallbackMap =
+        {
+            ("OnSelectCard", "OnSelectCardNew"),
+            ("OnSelectOption", "OnSelectOptionNew"),
+            ("OnSelectYesNo", "OnSelectYesNoNew"),
+            ("OnSelectPlace", "OnSelectPlaceNew"),
+            ("OnSelectPendulumSummon", "OnSelectPendulumSummonNew"),
+        };
+
+        private static readonly Dictionary<string, int> MissingHintMsg = new Dictionary<string, int>
+        {
+            ["Disable"] = 573, ["OperateCard"] = 574, ["RITUAL"] = 1057, ["FUSION"] = 1056,
+            ["SYNCHRO"] = 1063, ["XYZ"] = 1073, ["PENDULUM"] = 1074
+        };
+
+        /// <summary>
+        /// 2026-11-02 (B-70): 신버전 실행기 코드를 **구버전 + CompatDefaultExecutor** 에서 컴파일되도록 바꾼다.
+        /// 콜백 이름은 `...New` 로(브리지가 int 시그니처로 넘겨줌), 없는 API 는 `CompatShim` 확장 호출로.
+        /// </summary>
+        public static string Compatize(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+
+            // 1) 콜백 이름 → 브리지
+            foreach (var m in CallbackMap)
+                text = Regex.Replace(text, @"(?<![\w])" + m.From + @"(?![\w])", m.To);
+
+            // 2) long → int 로 잘라야 하는 곳
+            text = text.Replace("Util.GetStringId(", "Util.StringId(");
+            text = Regex.Replace(text, @"(?<![\w.])ActivateDescription(?![\w])", "((int)ActivateDescription)");
+
+            // 3) 신버전 전용 Duel 멤버
+            text = text.Replace("Duel.LastChainLocation", "CompatShim.GetLastChainLocation(Duel)");
+            text = text.Replace("Duel.CurrentChainInfo", "Duel.GetCurrentChainInfo()");
+            text = text.Replace("Duel.SolvingChainIndex", "CompatShim.GetSolvingChainIndex(Duel)");
+            text = text.Replace("Duel.NegatedChainIndexList", "CompatShim.GetNegatedChainIndexList(Duel)");
+
+            // 4) 속성처럼 쓰이는 신버전 멤버 → 확장 호출 (순서 중요: LastChainTargets 먼저)
+            text = Regex.Replace(text, @"(\w+)\.LastChainTargets\b", "CompatShim.GetLastChainTargets($1)");
+            text = Regex.Replace(text, @"(\w+)\.HintDescriptions\b", "CompatShim.GetHintDescriptions($1)");
+            text = Regex.Replace(text, @"(\w+)\.LastLocation\b", "CompatShim.LastLocation($1)");
+
+            // 5) 나머지 신버전 API
+            text = text.Replace("CardContainer.CompareCardLink", "CompatShim.CompareCardLink");
+            text = text.Replace("CardRace.BeastWarrior", "(CardRace)0x8000");
+            text = text.Replace("Program.Rand", "CompatShim.Rand");
+
+            // 6) 구버전 HintMsg 에 없는 상수 → 값
+            foreach (var kv in MissingHintMsg)
+                text = Regex.Replace(text, @"HintMsg\." + kv.Key + @"(?![\w])", kv.Value.ToString());
+
+            return text;
+        }
 
         private static Dictionary<string, int> LoadGlobalIds(string? path, Result r)
         {

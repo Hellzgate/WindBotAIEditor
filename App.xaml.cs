@@ -293,6 +293,12 @@ public partial class App : Application
             problems.AddRange(w.VerifySettingBadgesUi());
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-68): 규칙 JSON 형식 판별(분석 덤프 오인 방지)
+            total = problems.Count;
+            problems.AddRange(w.VerifyProfileJsonGuardUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
             total = problems.Count;
             problems.AddRange(w.VerifyB24Ui());
             for (var i = total; i < problems.Count; i++)

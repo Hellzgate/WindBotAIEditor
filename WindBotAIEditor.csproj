@@ -7,13 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.10.0</Version>
-    <AssemblyVersion>1.10.0.0</AssemblyVersion>
-    <FileVersion>1.10.0.0</FileVersion>
+    <Version>1.11.0</Version>
+    <AssemblyVersion>1.11.0.0</AssemblyVersion>
+    <FileVersion>1.11.0.0</FileVersion>
     <Product>WindBot AI Editor</Product>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <!-- .yrpX 압축(LZMA1) 해제용 — 관리 코드만 사용하므로 단일 파일 게시에 안전 -->
     <PackageReference Include="SharpCompress" Version="0.48.0" />
@@ -27,6 +28,7 @@
     <!-- 예제/생성물은 빌드 대상에서 제외 -->
     <Compile Remove="samples\**" />
     <None Include="samples\**" />
+    <None Include="compat\WindBotCompat.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- B-38: 설치 프로그램 소스는 앱 빌드에서 제외 (csc 로 따로 컴파일해 exe 만 포함) -->
     <Compile Remove="install-assets\**" />
     <!-- (2026-10-29) 봇 패키지는 V3 형식(6파일)만 — 설치.exe/카드 데이터는 배포본에 넣지 않는다 -->
@@ -36,11 +38,19 @@
   </ItemGroup>
 
   <!-- (2026-10-29) publish 는 None+CopyToPublishDirectory 를 단일파일 게시에서 놓치는 경우가 있어 명시적으로 복사 -->
+  <!-- B-70: 신버전 호환 베이스 DLL 은 publish 단일파일에서 자동 복사되지 않는다 -->
+  <Target Name="CopyCompatToPublish" AfterTargets="Publish" Condition="Exists('compat\WindBotCompat.dll')">
+    <Copy SourceFiles="compat\WindBotCompat.dll" DestinationFolder="$(PublishDir)compat" />
+  </Target>
+
   <Target Name="CopyInstallerToPublish" AfterTargets="Publish" Condition="Exists('install-assets\설치.exe')">
     <Copy SourceFiles="install-assets\설치.exe" DestinationFolder="$(PublishDir)install-assets" />
   </Target>
 
 </Project>
+
+
+
 
 
 

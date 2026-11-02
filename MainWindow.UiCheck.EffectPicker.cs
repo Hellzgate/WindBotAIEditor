@@ -673,6 +673,40 @@ namespace WindBotAIEditor
             }
             return problems;
         }
+
+        /// <summary>
+        /// 2026-11-02 (B-68): 규칙 JSON 형식 판별 — **분석 덤프**를 규칙으로 오인해 조용히 0규칙으로 여는 사고 방지.
+        /// </summary>
+        public List<string> VerifyProfileJsonGuardUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                string why;
+                // 정상 규칙 JSON
+                if (!ProfileJsonGuard.IsEditorProfile("{\"engine\":\"X\",\"actions\":[]}", out why))
+                    problems.Add("b68: 정상 규칙 JSON 을 거부했습니다 (" + why + ")");
+                // 분석 덤프
+                if (ProfileJsonGuard.IsEditorProfile("{\"class\":\"XExecutor\",\"deckName\":\"X\",\"behaviors\":[{\"type\":\"Activate\"}],\"signalCounts\":{}}", out why))
+                    problems.Add("b68: 분석 덤프를 규칙으로 통과시킴");
+                else if (why.IndexOf("분석 덤프", StringComparison.Ordinal) < 0)
+                    problems.Add("b68: 덤프 거부 사유가 불명확: " + why);
+                // 규칙 키 없음
+                if (ProfileJsonGuard.IsEditorProfile("{\"foo\":1}", out why))
+                    problems.Add("b68: 규칙 키가 없는데 통과시킴");
+                // 깨진 JSON
+                if (ProfileJsonGuard.IsEditorProfile("{ not json", out why))
+                    problems.Add("b68: 깨진 JSON 을 통과시킴");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b68 jsonGuard ok profile=OK dump=blocked nokey=blocked broken=blocked");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b68: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
     }
 }
 

@@ -526,6 +526,15 @@ namespace WindBotAIEditor
                 if (dlg.ShowDialog() != true) return;
 
                 var text = File.ReadAllText(dlg.FileName);
+
+                // 2026-11-02: **분석 덤프(decks-json) 오인 방지** — 스키마가 다르면 조용히 0규칙이 되므로 먼저 걸러낸다
+                string why;
+                if (!ProfileJsonGuard.IsEditorProfile(text, out why))
+                {
+                    Status("불러오기 실패: " + why);
+                    return;
+                }
+
                 var p = JsonSerializer.Deserialize<AiProfile>(text, WindBotProject.JsonOpts);
                 if (p == null) { Status("불러오기 실패: 규칙 JSON 형식이 아닙니다"); return; }
                 RuleMigration.Normalize(p);
@@ -560,6 +569,12 @@ namespace WindBotAIEditor
 
                 var counts2 = "행동 " + _actions.Count + " / 선택 " + _choices.Count + " / 금지 " + _forbids.Count +
                               " / 루트 " + RouteSetCount(false) + "벌";
+                // 2026-11-02: 규칙이 하나도 없으면 명확히 알린다 (스키마가 다른 파일을 조용히 여는 것 방지)
+                if (_actions.Count + _choices.Count + _forbids.Count == 0)
+                {
+                    Status("불러왔지만 규칙이 0개입니다 — 에디터 규칙 JSON이 아닐 수 있습니다 (원본 .cs 를 --scaffold 로 변환)");
+                    return;
+                }
                 Status("다른 JSON 덮어쓰기: " + Path.GetFileName(dlg.FileName) + " — " + counts2 +
                        (applyEngine2 ? " · 엔진 적용(" + p.Engine + ")" : " · 엔진 유지(" + p.Engine + ")") +
                        " · [규칙 저장] 으로 반영");
@@ -4345,6 +4360,8 @@ namespace WindBotAIEditor
         }
     }
 }
+
+
 
 
 

@@ -193,6 +193,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using WindBot.Game;");
             sb.AppendLine("using WindBot.Game.AI;");
+            if (p.CompatBase) sb.AppendLine("using WindBot.Compat;   // B-70: 신버전 호환 베이스");
             sb.AppendLine("using YGOSharp.OCGWrapper.Enums;");
             // 2026-11-02: 포팅 스캐폴드 — 원본 실행기의 추가 using
             if (p.RawUsings != null)
@@ -217,7 +218,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("namespace WindBot.Game.AI.Decks");
             sb.AppendLine("{");
             sb.AppendLine($"    [Deck(\"{p.Engine}\", \"AI_{p.Engine}\", \"Normal\")]");
-            sb.AppendLine("    public class " + cls + " : DefaultExecutor");
+            sb.AppendLine("    public class " + cls + " : " + (p.CompatBase ? "CompatDefaultExecutor" : "DefaultExecutor"));
             sb.AppendLine("    {");
             // 2026-11-02: 포팅 스캐폴드 — 원본 실행기의 나머지 멤버(CardId/필드/헬퍼)를 그대로 넣는다
             if (!string.IsNullOrWhiteSpace(p.RawMembers))
@@ -586,7 +587,7 @@ namespace WindBotAIEditor.Services
 
             // ---- 존 지정 (소환 존 / 마함 열 회피) ----
             var zoneActions = actions.Where(a => a.Card > 0 && (a.SummonZone == "main" || a.SummonZone == "extra")).ToList();
-            if (zoneActions.Count > 0 || avoidColumnCard > 0 || placeRules.Count > 0 || p.LinkPlaceAware)   // N-5: 링크 존 선택 시에도 생성
+            if (!p.CompatBase && (zoneActions.Count > 0 || avoidColumnCard > 0 || placeRules.Count > 0 || p.LinkPlaceAware))   // N-5 / B-70: CompatBase 면 원본이 담당
             {
                 sb.AppendLine();
                 if (avoidColumnCard > 0)
@@ -609,7 +610,7 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        // ---- 존 지정 (소환 존 / 마함 열 회피) ----");
                 sb.AppendLine("        public override int OnSelectPlace(long cardId, int player, CardLocation location, int available)");
                 sb.AppendLine("        {");
-                if (placeRules.Count > 0)
+                if (!p.CompatBase && placeRules.Count > 0)
                 {
                     sb.AppendLine("            int ruleZone = SelectZoneByRule(cardId, player, location, available);");
                     sb.AppendLine("            if (ruleZone >= 0) return ruleZone;   // ② 선택 규칙(조건 포함)이 먼저");
@@ -712,6 +713,8 @@ namespace WindBotAIEditor.Services
             // ---- 소환 시 표시형식 (공격/수비) ----
             var posActions = actions.Where(a => a.Card > 0 && (a.SummonPosition == "attack" || a.SummonPosition == "defense")).ToList();
             // B-40: 토큰은 수비 표시로 — 규칙 유무와 무관하게 이 오버라이드는 항상 생성한다
+            // B-70: CompatBase 면 원본 실행기가 OnSelectPosition 을 직접 갖고 있으므로 생성하지 않는다
+            if (!p.CompatBase)
             {
                 sb.AppendLine();
                 sb.AppendLine("        // B-40: 필드의 토큰 판정 (Data.Type 0x4000)");
@@ -1055,6 +1058,7 @@ namespace WindBotAIEditor.Services
                 bool needFilter = needDestructFilter || needEffectImmuneFilter || needProtectFilter
                                   || (isSelectCard && (forbidTarget.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0))
                                   || (!isSelectCard && needReleaseFilter);
+                if (p.CompatBase) continue;   // B-70: 원본 rawMembers 가 ...New 로 제공
                 if (rulesForCb.Count == 0 && !needFilter) continue;
 
                 sb.AppendLine();
@@ -1288,7 +1292,7 @@ namespace WindBotAIEditor.Services
 
             // ---- YesNo / Option / Announce / Place / Position ----
             // B-6: 조건이 있으면 조건을 먼저 검사한다. 불충족 → 다음 우선순위 규칙 → 모두 불충족이면 base 로 위임.
-            if (yesNoRules.Count > 0)
+            if (!p.CompatBase && yesNoRules.Count > 0)
             {
                 sb.AppendLine();
                 sb.AppendLine("        public override bool OnSelectYesNo(long desc)");
@@ -1307,7 +1311,7 @@ namespace WindBotAIEditor.Services
 
             // B-21: debugEffectLog ON 이면 옵션 콜백 선택 결과를 콘솔에 남긴다 (규칙이 없어 base 로 위임하는 경우도 1회)
             bool dbgOption = p.DebugEffectLog;
-            if (optionRules.Count > 0 || dbgOption)
+            if (!p.CompatBase && (optionRules.Count > 0 || dbgOption))
             {
                 sb.AppendLine();
                 sb.AppendLine("        public override int OnSelectOption(IList<long> options)");
@@ -1400,7 +1404,7 @@ namespace WindBotAIEditor.Services
             }
 
             // 존 선택: 소환 존/열 회피가 같은 메서드를 쓰므로, 그때는 헬퍼만 만들고 위에서 호출한다 (중복 정의 방지)
-            if (placeRules.Count > 0)
+            if (!p.CompatBase && placeRules.Count > 0)
             {
                 bool mergedPlace = zoneActions.Count > 0 || avoidColumnCard > 0;
                 if (!mergedPlace)
@@ -1934,7 +1938,8 @@ namespace WindBotAIEditor.Services
             if (forbidRelease.Count > 0) sb.Append(ForbidHelper("IsForbiddenRelease", forbidRelease, f => IsCodeOr("card", f.Card), true));
 
             // B-16: 엑스트라 덱 몬스터(융합·싱크로·엑시즈·링크) 판정 + 릴리스 후보 필터
-            if (protectExtra)
+            // B-70: CompatBase 면 원본 실행기에 같은 이름 멤버가 있어 중복 정의가 되므로 생성하지 않는다
+            if (protectExtra && !p.CompatBase)
             {
                 sb.AppendLine("        // B-16: 엑스트라 덱 몬스터인가 (융합 0x40 / 싱크로 0x2000 / 엑시즈 0x800000 / 링크 0x4000000)");
                 sb.AppendLine("        private static bool IsExtraDeckMonster(ClientCard c)");
@@ -3881,6 +3886,10 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
+
+
+
 
 
 

@@ -876,6 +876,15 @@ namespace WindBotAIEditor.Models
         /// 포팅 스캐폴드에서 원본 실행기의 나머지 부분을 보존한다(RawBody 가 참조하는 심볼들).
         /// </summary>
         public string RawMembers { get; set; } = "";
+
+        /// <summary>
+        /// 2026-11-02 (B-70): **신버전 호환 베이스** 사용 여부.
+        /// <para>true 면 생성 클래스가 `WindBot.Compat.CompatDefaultExecutor` 를 상속하고
+        /// `WindBotCompat.dll` 을 참조한다(신버전 IceYGO 실행기를 구버전 WindBot 에서 돌리기 위한 계층).</para>
+        /// <para>이 모드에서는 `OnSelectCard`/`OnSelectOption`/`OnSelectYesNo`/`OnSelectPlace`/`OnSelectPosition`
+        /// 콜백을 **생성기가 만들지 않는다** — 원본 본문(`rawMembers`)이 `...New` 이름으로 제공한다.</para>
+        /// </summary>
+        public bool CompatBase { get; set; }
         public List<ActionRule> Actions { get; set; } = new List<ActionRule>();
         public List<ChoiceRule> Choices { get; set; } = new List<ChoiceRule>();
         public List<ForbidRule> Forbids { get; set; } = new List<ForbidRule>();
