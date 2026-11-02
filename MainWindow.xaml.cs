@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -348,6 +348,7 @@ namespace WindBotAIEditor
             _profile.DefaultSummonPosition = (CmbDefaultPosition.SelectedValue as string) ?? "attack";   // B-31
             _profile.AttackOnlyWinnable = ChkAttackOnlyWinnable.IsChecked == true;   // B-36
             _profile.LinkPlaceAware = ChkLinkPlace.IsChecked == true;              // N-5
+            _profile.RouteAuthoritative = ChkRouteAuthoritative.IsChecked == true;  // B-73 (2026-11-02)
             _profile.SkipResistantGlobal = ChkSkipResistantGlobal.IsChecked == true;   // 2026-11-01
             _profile.SkipDestructImmuneOnDestroy = ChkSkipDestructImmune.IsChecked == true;   // 2026-11-01
             _profile.SkipEffectImmuneTargets = ChkSkipEffectImmune.IsChecked == true;         // 2026-11-02
@@ -388,6 +389,7 @@ namespace WindBotAIEditor
             if (ChkSameNameAliases != null) ChkSameNameAliases.IsChecked = p.SameNameAliases;   // B-12
             if (ChkAttackOnlyWinnable != null) ChkAttackOnlyWinnable.IsChecked = p.AttackOnlyWinnable;   // B-36
             if (ChkLinkPlace != null) ChkLinkPlace.IsChecked = p.LinkPlaceAware;   // N-5
+            if (ChkRouteAuthoritative != null) ChkRouteAuthoritative.IsChecked = p.RouteAuthoritative;   // B-73
             if (CmbDefaultPosition != null) CmbDefaultPosition.SelectedValue = string.IsNullOrWhiteSpace(p.DefaultSummonPosition) ? "attack" : p.DefaultSummonPosition;   // B-31
             if (ChkSkipResistantGlobal != null) ChkSkipResistantGlobal.IsChecked = p.SkipResistantGlobal;   // 2026-11-01
             if (ChkSkipDestructImmune != null) ChkSkipDestructImmune.IsChecked = p.SkipDestructImmuneOnDestroy;   // 2026-11-01
@@ -602,7 +604,6 @@ namespace WindBotAIEditor
             GridForbidConds.CommitEdit(DataGridEditingUnit.Row, true);
             GridTriggers.CommitEdit(DataGridEditingUnit.Row, true);
             GridOpps.CommitEdit(DataGridEditingUnit.Row, true);
-            GridRouteConds.CommitEdit(DataGridEditingUnit.Row, true);
         }
 
         private void OnBuildEngine(object sender, RoutedEventArgs e)
@@ -858,7 +859,6 @@ namespace WindBotAIEditor
             GridForbidConds.Items.Refresh();
             GridTriggers.Items.Refresh();
             GridOpps.Items.Refresh();
-            GridRouteConds.Items.Refresh();
             ItemsRoute?.Items.Refresh();
             UpdateFreePlaySetExcludeText();
             UpdateTributeGuardExceptText();
@@ -882,11 +882,13 @@ namespace WindBotAIEditor
             if (GridActions.SelectedItem is ActionRule a)
             {
                 GridConds.ItemsSource = a.Conditions;
+                OnCondGridPreview(GridConds, System.EventArgs.Empty);   // B-80: 미리보기 바 갱신
                 TxtCondHeader.Text = $"조건 — {a.Type}" + (a.Card > 0 ? $" / {a.Card}" : " / 카드 무관");
             }
             else
             {
                 GridConds.ItemsSource = null;
+                ShowCondPreview("", 0, "① 행동 조건");
                 TxtCondHeader.Text = "조건 — 모두 만족";
             }
         }
@@ -940,12 +942,14 @@ namespace WindBotAIEditor
             {
                 c.Conditions ??= new List<Condition>();
                 GridChoiceConds.ItemsSource = c.Conditions;
+                OnCondGridPreview(GridChoiceConds, System.EventArgs.Empty);   // B-80: 미리보기 바 갱신
                 ChoiceCondTitle.Text = $"규칙: {c.OnName.Label} · 우선 {c.Priority}" +
                                        (c.WhenCard > 0 ? $" · 발동카드 {c.WhenCard}" : " · 발동카드 무관");
             }
             else
             {
                 GridChoiceConds.ItemsSource = null;
+                ShowCondPreview("", 0, "② 선택 조건");
                 ChoiceCondTitle.Text = "선택 규칙 행을 먼저 선택하세요";
             }
             GridChoiceConds.Items.Refresh();
@@ -1020,7 +1024,13 @@ namespace WindBotAIEditor
             if (_profile != null) _profile.LinkPlaceAware = on;
             Status("링크 마커 기반 존 선택: " + (on ? "ON" : "OFF"));
         }
-        /// <summary>2026-11-01: 내성 몹 대상 제외 — 전체 기본값 토글</summary>
+        /// <summary>B-73 (2026-11-02): 루트 순서 강제 — ① 액션이 루트 단계를 앞지르지 못하게</summary>
+        private void OnRouteAuthoritativeChanged(object sender, RoutedEventArgs e)
+        {
+            bool on = ChkRouteAuthoritative.IsChecked == true;
+            if (_profile != null) _profile.RouteAuthoritative = on;
+            Status("⑤ 루트 순서 강제: " + (on ? "ON" : "OFF"));
+        }        /// <summary>2026-11-01: 내성 몹 대상 제외 — 전체 기본값 토글</summary>
         private void OnSkipResistantGlobalChanged(object sender, RoutedEventArgs e)
         {
             bool on = ChkSkipResistantGlobal.IsChecked == true;
@@ -1243,11 +1253,13 @@ namespace WindBotAIEditor
             {
                 f.Conditions ??= new List<Condition>();
                 GridForbidConds.ItemsSource = f.Conditions;
+                OnCondGridPreview(GridForbidConds, System.EventArgs.Empty);   // B-80: 미리보기 바 갱신
                 ForbidCondTitle.Text = $"대상: 카드 {f.Card} · {f.ActionName}";
             }
             else
             {
                 GridForbidConds.ItemsSource = null;
+                ShowCondPreview("", 0, "③ 금지 조건");
                 ForbidCondTitle.Text = "금지 규칙 행을 먼저 선택하세요";
             }
             GridForbidConds.Items.Refresh();
@@ -1317,6 +1329,7 @@ namespace WindBotAIEditor
 
             f.Conditions = list;
             GridForbidConds.ItemsSource = f.Conditions;
+            OnCondGridPreview(GridForbidConds, System.EventArgs.Empty);   // B-80: 미리보기 바 갱신
             GridForbidConds.Items.Refresh();
             Status($"예외 조건 {list.Count}개를 행동 규칙에서 복사했습니다.");
         }
@@ -1416,7 +1429,6 @@ namespace WindBotAIEditor
                 }
             }
             finally { _routeUiBusy = false; }
-            UpdateRouteCondHeader();
             UpdateRuleSummary();
         }
 
@@ -1519,6 +1531,19 @@ namespace WindBotAIEditor
         }
 
         private void OnRemoveRouteSet(object sender, RoutedEventArgs e) => RemoveRouteSet(_selectedRouteSet);
+
+        /// <summary>
+        /// 2026-11-02: 루트 목록에서 **Delete 키**로 선택한 루트(한 벌)를 삭제한다.
+        /// (상단 `− 루트` 버튼과 같은 동작 — 발견하기 쉽도록 키보드 경로도 제공)
+        /// </summary>
+        private void OnRouteSetsKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key != System.Windows.Input.Key.Delete) return;
+            var set = ListRouteSets?.SelectedItem as RouteSet ?? _selectedRouteSet;
+            if (set == null) return;
+            e.Handled = true;
+            RemoveRouteSet(set);
+        }
 
         private void RemoveRouteSet(RouteSet? set)
         {
@@ -1671,10 +1696,19 @@ namespace WindBotAIEditor
             RenumberRoute();
         }
 
+        /// <summary>
+        /// 2026-11-02 (A): 순위 [조건] 배지 → 그 단계의 **조건 편집 팝업**을 그 순위로 열어 준다.
+        /// (예전에는 아래 조건 그리드의 편집 대상을 바꿨다)
+        /// </summary>
         private void OnEditRouteOptionConditions(object sender, RoutedEventArgs e)
         {
             var opt = RouteOptionOf(sender);
-            if (opt != null) SelectRouteOption(opt);
+            if (opt == null) return;
+            SelectRouteOption(opt);
+            var step = ActiveSteps.FirstOrDefault(st => st.Options.Contains(opt));
+            if (step == null) return;
+            int no = ActiveSteps.IndexOf(step) + 1;
+            OpenStepConditionsPopup(step, no, opt.Rank);
         }
 
         /// <summary>
@@ -1696,47 +1730,14 @@ namespace WindBotAIEditor
                 foreach (var o in step.Options)
                     o.NotifyConditions();
             _selectedRouteSet?.NotifyConditions();
-
-            RefreshRouteCondGrid();
-            UpdateRouteCondHeader();
         }
 
         /// <summary>아래 조건 그리드에 연결된 조건 목록 (순위 조건 우선, 없으면 루트 진입 조건)</summary>
         private List<Condition>? ConditionTarget =>
             _selectedRouteOption?.Conditions ?? _selectedRouteSet?.Conditions;
 
-        private void RefreshRouteCondGrid()
-        {
-            GridRouteConds.ItemsSource = ConditionTarget;
-            GridRouteConds.Items.Refresh();
-        }
 
-        private void UpdateRouteCondHeader()
-        {
-            if (_selectedRouteOption != null)
-            {
-                var stepNo = 0;
-                var steps = ActiveSteps;
-                for (var i = 0; i < steps.Count; i++)
-                    if (steps[i].Options.Contains(_selectedRouteOption)) { stepNo = i + 1; break; }
 
-                TxtRouteCondHeader.Text = "순위 조건 — " + TrackName + " · " + (_selectedRouteSet?.DisplayName ?? "?") +
-                                          " · " + (stepNo > 0 ? stepNo + "단계" : "?단계") + " · " + _selectedRouteOption.Rank + "순위" +
-                                          (_selectedRouteOption.Card > 0 ? " · 카드 " + _selectedRouteOption.Card : " · 카드 미지정");
-                return;
-            }
-
-            if (_selectedRouteSet != null)
-            {
-                TxtRouteCondHeader.Text = "루트 진입 조건 — " + TrackName + " · " + _selectedRouteSet.DisplayName +
-                                          " (비어 있으면 항상 이 루트를 선택)";
-                return;
-            }
-
-            TxtRouteCondHeader.Text = "루트를 선택하면 진입 조건을, 순위 [조건]을 누르면 그 순위 조건을 편집합니다";
-        }
-
-        private void OnAddRouteCond(object sender, RoutedEventArgs e) => AddRouteCondition();
 
         private Condition AddRouteCondition()
         {
@@ -1750,30 +1751,10 @@ namespace WindBotAIEditor
             target.Add(c);
             _selectedRouteOption?.NotifyConditions();
             _selectedRouteSet?.NotifyConditions();
-            RefreshRouteCondGrid();
-            if (GridRouteConds.Items.Count > 0) GridRouteConds.SelectedIndex = GridRouteConds.Items.Count - 1;
             return c;
         }
 
-        private void OnRemoveRouteCond(object sender, RoutedEventArgs e)
-        {
-            var target = ConditionTarget;
-            if (target == null || GridRouteConds.SelectedItem is not Condition c) return;
-            target.Remove(c);
-            _selectedRouteOption?.NotifyConditions();
-            _selectedRouteSet?.NotifyConditions();
-            RefreshRouteCondGrid();
-        }
 
-        private void OnPickRouteCondCard(object sender, RoutedEventArgs e)
-        {
-            if (GridRouteConds.SelectedItem is not Condition c)
-            {
-                MessageBox.Show("조건 행을 먼저 선택하세요.", "카드 선택");
-                return;
-            }
-            if (PickCard(c.Card) is int v) { c.Card = v; GridRouteConds.Items.Refresh(); }
-        }
 
         // ================= 리플레이(.yrpX) → 전개 루트 (B-3) =================
 
@@ -1866,7 +1847,6 @@ namespace WindBotAIEditor
         {
             foreach (var set in _routes) RenumberRouteSet(set);
             foreach (var set in _routesSecond) RenumberRouteSet(set);
-            UpdateRouteCondHeader();
         }
 
         private static void RenumberRouteSet(RouteSet set)
@@ -1887,7 +1867,6 @@ namespace WindBotAIEditor
             RefreshGroupBadges(GridConds?.ItemsSource);
             RefreshGroupBadges(GridChoiceConds?.ItemsSource);
             RefreshGroupBadges(GridForbidConds?.ItemsSource);
-            RefreshGroupBadges(GridRouteConds?.ItemsSource);
 
             TxtRuleSummary.Text = "행동 " + p.Actions.Count
                                   + " · 선택 " + p.Choices.Count
@@ -1904,19 +1883,14 @@ namespace WindBotAIEditor
             UpdateRuleSummary();
         }
 
-        /// <summary>B-9: 설정 카드(2열)를 접거나 펼친다 — 기본은 접힘(규칙 서브탭 공간 확보).</summary>
+        /// <summary>
+        /// 2026-11-02: 설정 카드를 **`0. 기본 · 전역` 서브탭**으로 옮겨 '접기' 개념을 없앴다.
+        /// 호출부(검색/배지/자기검사) 호환을 위해 메서드는 남기되 **항상 보이게** 유지한다.
+        /// </summary>
         private void SetSettingsCollapsed(bool collapsed)
         {
             if (PnlSettings == null) return;
-            PnlSettings.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-            if (BtnToggleSettings != null) BtnToggleSettings.Content = collapsed ? "설정 펼치기" : "설정 접기";
-        }
-
-        /// <summary>설정 카드 접기/펼치기 버튼.</summary>
-        private void OnToggleSettingsPanel(object sender, RoutedEventArgs e)
-        {
-            if (PnlSettings == null) return;
-            SetSettingsCollapsed(PnlSettings.Visibility == Visibility.Visible);
+            PnlSettings.Visibility = Visibility.Visible;
         }
 
         // ================= ⑤ 탭 자기검사 (--uicheck, 화면 표시 없음) =================
@@ -1973,7 +1947,7 @@ namespace WindBotAIEditor
         /// <summary>B-9: ⚙ AI 설정 안의 규칙 서브탭 헤더 (①~⑤)</summary>
         public static readonly string[] RuleTabHeaders =
         {
-            "① 행동 · 조건", "② 선택 규칙", "③ 금지 규칙", "④ 트리거", "⑤ 전개 루트"
+            "0. 기본 · 전역", "① 행동 · 조건", "② 선택 규칙", "③ 금지 규칙", "④ 트리거", "⑤ 전개 루트"
         };
 
         /// <summary>규칙 서브탭(0=① … 4=⑤)을 ⚙ AI 설정 안에서 선택한다.</summary>
@@ -2074,7 +2048,7 @@ namespace WindBotAIEditor
             string[] names =
             {
                 "TxtEngineName", "TxtEngineDesc", "ChkFreePlay", "ChkDebugEffect", "CmbRps", "CmbTurnChoice",
-                "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "BtnToggleSettings", "PnlSettings", "PnlSettingsCard",
+                "CmbDialog", "CmbChainBasis", "CardAvoidColumn", "ChkSameNameAliases", "PnlSettings", "PnlSettingsCard",
                 "ChkFreePlaySetSpell", "CmbFreePlaySetKind", "CardFreePlaySetExclude", "TxtFreePlaySetExclude", "PnlFreePlaySetSpell",
                 "ChkFreePlayProtectExtra", "CardTributeGuardExcept", "TxtTributeGuardExcept",
                 "CardDestructibleImmune", "TxtDestructibleImmune",
@@ -2084,15 +2058,15 @@ namespace WindBotAIEditor
                 "CardDestroy", "TxtDestroy", "BtnDestroyDefault", "ChkSkipDestructImmuneDestroy", "ChkAndroidSafe",
                 "BtnImportJson", "ChkImportApplyEngine", "BtnRawBody",
                 "TxtSettingsSearch", "TxtSettingsSearchInfo",
-                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace", "ChkSkipResistantGlobal",
+                "ChkShowPreErrata", "CmbDefaultPosition", "ChkAttackOnlyWinnable", "ChkLinkPlace", "ChkRouteAuthoritative", "ChkSkipResistantGlobal", "BtnShowRoutedCode",
                 "ChkSkipDestructImmune",
                 "BtnPreReleaseConvert", "TxtPreReleaseWarn",
                 "TxtRuleSummary", "TxtProfilePath", "TxtBuildLog",
                 "ListDecks", "TxtDeck", "TxtDeckCardFilter", "ListDeckCards", "TxtDeckInfo",
                 "GridActions", "GridConds", "GridChoices", "GridChoiceConds", "GridForbids", "GridForbidConds",
-                "GridTriggers", "GridOpps", "GridRouteConds", "ItemsRoute", "ListRouteSets", "CmbDialogFile",
+                "GridTriggers", "GridOpps", "ItemsRoute", "ListRouteSets", "CmbDialogFile",
                 "BtnRouteFirst", "BtnRouteSecond", "TxtRouteStatus", "TxtRouteNotice", "PnlRouteNotice",
-                "TxtRouteEmpty", "TxtRouteSetsEmpty", "ScrollRouteSteps"
+                "TxtRouteEmpty", "TxtRouteSetsEmpty", "ScrollRouteSteps", "PnlCondPreview", "TxtCondPreview", "BtnCopyCondExpr"
             };
             LayoutControlsChecked = names.Length;
             LayoutControlsFound = 0;
@@ -2134,20 +2108,21 @@ namespace WindBotAIEditor
                                 " deckText=" + Math.Round(TxtDeck.ActualWidth) + "x" + Math.Round(TxtDeck.ActualHeight);
             }
 
-            // 6) ⚙ AI 설정: 기본 = 설정 카드 접힘 + 규칙 서브탭(*) + 요약 + 빌드 로그  (B-9)
+            // 6) ⚙ AI 설정: `0. 기본 · 전역` 서브탭(설정 카드) + 규칙 서브탭(*) + 요약 + 빌드 로그
+            //    2026-11-02: 설정 카드를 접는 대신 **0번 서브탭**으로 옮겼다 → 접힘 검사 대신 "탭 내용이 보이는지" 검사
             if (setIdx >= 0)
             {
                 Tabs.SelectedIndex = setIdx;
-                SetSettingsCollapsed(true);
+                SelectRuleTab(0);                    // 설정 탭을 선택해야 실제 크기가 측정된다
+                SetSettingsCollapsed(false);
                 MeasureAt(minW, minH);
 
-                SettingsCollapsedByDefault = PnlSettings.Visibility == Visibility.Collapsed
-                                             && Convert.ToString(BtnToggleSettings.Content) == "설정 펼치기";
+                SettingsCollapsedByDefault = PnlSettings.Visibility == Visibility.Visible;
                 SettingsCollapsedHeight = PnlSettingsCard.ActualHeight;
                 RuleTabsHeight = RuleTabs == null ? 0 : RuleTabs.ActualHeight;
-                if (!SettingsCollapsedByDefault) problems.Add("설정 카드가 기본으로 접혀 있지 않음");
-                if (SettingsCollapsedHeight > 60)
-                    problems.Add("접힌 설정 카드가 너무 큼: " + Math.Round(SettingsCollapsedHeight));
+                if (!SettingsCollapsedByDefault) problems.Add("설정 탭 내용이 접혀 있음(보이지 않음)");
+                if (SettingsCollapsedHeight < 60)
+                    problems.Add("설정 탭 내용이 너무 작음: " + Math.Round(SettingsCollapsedHeight));
                 if (TxtBuildLog.ActualHeight < 60)
                     problems.Add("최소 높이에서 빌드 로그가 너무 낮음: " + Math.Round(TxtBuildLog.ActualHeight));
                 if (RuleTabsHeight < 300)
@@ -2155,7 +2130,7 @@ namespace WindBotAIEditor
 
                 LayoutMetrics += " ruleTabsH=" + Math.Round(RuleTabsHeight) +
                                  " buildLogH=" + Math.Round(TxtBuildLog.ActualHeight) +
-                                 " settingsCollapsedH=" + Math.Round(SettingsCollapsedHeight);
+                                 " settingsTabH=" + Math.Round(SettingsCollapsedHeight);
 
                 UpdateRuleSummary();
                 if (TxtRuleSummary.Text.IndexOf("행동", StringComparison.Ordinal) < 0)
@@ -2163,15 +2138,13 @@ namespace WindBotAIEditor
                 if (TxtRuleSummary.Text.IndexOf("선공 루트", StringComparison.Ordinal) < 0)
                     problems.Add("규칙 요약에 루트 벌 수가 없음: " + TxtRuleSummary.Text);
 
-                // 펼쳤을 때 수치 → 다시 접으면 원래대로 (설정 카드가 규칙 영역을 잠식하지 않는지)
+                // 2026-11-02: 접기/펼치기 개념 제거 — 설정 탭이 실제로 보이는지만 확인한다
                 SetSettingsCollapsed(false);
                 MeasureAt(minW, minH);
                 SettingsExpandedHeight = PnlSettingsCard.ActualHeight;
-                var expandedRuleTabsH = RuleTabs == null ? 0 : RuleTabs.ActualHeight;
                 var settingsSize = Math.Round(PnlSettings.ActualWidth) + "x" + Math.Round(PnlSettings.ActualHeight);
-                if (SettingsExpandedHeight <= SettingsCollapsedHeight)
-                    problems.Add("설정 펼치기가 동작하지 않음 (" + Math.Round(SettingsCollapsedHeight) +
-                                 " → " + Math.Round(SettingsExpandedHeight) + ")");
+                if (PnlSettings.ActualHeight < 60)
+                    problems.Add("설정 스크롤 영역이 너무 작음: " + Math.Round(PnlSettings.ActualHeight) + "px");
 
                 // B-12: 같은 이름 카드 체크박스가 설정 카드(스크롤 영역) 안에서 실제로 보이는지
                 double aliasBottom = -1;
@@ -2187,30 +2160,22 @@ namespace WindBotAIEditor
                 else if (aliasBottom > PnlSettings.ActualHeight)
                     problems.Add("같은 이름 카드 체크박스가 설정 카드 스크롤 아래로 밀려 안 보임 (" +
                                  Math.Round(aliasBottom) + " > " + Math.Round(PnlSettings.ActualHeight) + ")");
-                SetSettingsCollapsed(true);
-                MeasureAt(minW, minH);
-                if (PnlSettings.Visibility != Visibility.Collapsed) problems.Add("설정 카드 복원(접힘) 실패");
-                if (PnlSettingsCard.ActualHeight > 60)
-                    problems.Add("다시 접은 뒤 설정 카드가 큼: " + Math.Round(PnlSettingsCard.ActualHeight));
 
-                LayoutMetrics += " expandedSettingsH=" + Math.Round(SettingsExpandedHeight) +
-                                 " expandedRuleTabsH=" + Math.Round(expandedRuleTabsH) +
+                LayoutMetrics += " settingsTabH2=" + Math.Round(SettingsExpandedHeight) +
                                  " settings=" + settingsSize;
             }
 
             // 7) ⑤ 전개 루트: 최소 크기와 기본 크기 모두에서 루트 목록/단계 영역이 실제로 보여야 한다 (B-9: 서브탭)
-            if (SelectRuleTab(4))
+            if (SelectRuleTab(5))
             {
                 UpdateRouteTrackUi();               // 트랙 버튼 색/문구 갱신
                 MeasureAt(minW, minH);
                 RouteListHeight = ListRouteSets.ActualHeight;
                 StepsHeight = ScrollRouteSteps.ActualHeight;
-                var condsH = GridRouteConds.ActualHeight;
                 if (RouteListHeight <= 0) problems.Add("1100x700 에서 ⑤ 루트 목록 높이가 0: " + Math.Round(RouteListHeight));
                 else if (RouteListHeight < 120) problems.Add("1100x700 에서 ⑤ 루트 목록이 너무 낮음: " + Math.Round(RouteListHeight));
                 if (StepsHeight <= 0) problems.Add("1100x700 에서 ⑤ 단계 영역 높이가 0: " + Math.Round(StepsHeight));
                 else if (StepsHeight < 120) problems.Add("1100x700 에서 ⑤ 단계 영역이 너무 낮음: " + Math.Round(StepsHeight));
-                if (condsH > 200) problems.Add("⑤ 조건 그리드가 너무 큼(목록을 밀어냄): " + Math.Round(condsH));
 
                 MeasureAt(1560, 1000);
                 RouteListHeightDefault = ListRouteSets.ActualHeight;
@@ -2219,7 +2184,6 @@ namespace WindBotAIEditor
                     problems.Add("1560x1000 에서 ⑤ 영역이 0 (" + Math.Round(RouteListHeightDefault) + " / " + Math.Round(StepsHeightDefault) + ")");
 
                 LayoutMetrics += " routeListH=" + Math.Round(RouteListHeight) + " stepsH=" + Math.Round(StepsHeight) +
-                                 " routeCondsH=" + Math.Round(condsH) +
                                  " default(1560x1000)=routeListH " + Math.Round(RouteListHeightDefault) +
                                  "/stepsH " + Math.Round(StepsHeightDefault);
 
@@ -2471,7 +2435,7 @@ namespace WindBotAIEditor
 
             // B-9: 규칙 ①~⑤ 는 ⚙ AI 설정 하위 서브탭이다. ⑤ 서브탭을 열어야 내용이 측정되어 카드가 생성된다.
             // 0) ⑤ 탭을 실제로 열어 카드 템플릿까지 생성되는지 확인 (XAML 템플릿 오류 검출)
-            SelectRuleTab(4);
+            SelectRuleTab(5);
             Relayout();
 
             // 1) 선공 트랙: 루트 추가 → 단계/순위/조건 추가
@@ -2507,11 +2471,9 @@ namespace WindBotAIEditor
             if (!step.Options[1].ConditionBadge.Contains("조건 1")) problems.Add("순위 조건 배지 갱신 실패: " + step.Options[1].ConditionBadge);
 
             SelectRouteOption(null);                                // 루트 진입 조건
-            if (!ReferenceEquals(GridRouteConds.ItemsSource, set.Conditions)) problems.Add("루트 진입 조건 그리드 연결 실패");
             AddRouteCondition();
             if (set.Conditions.Count != 1) problems.Add("루트 진입 조건 추가 실패");
             if (!set.ConditionBadge.Contains("조건 1")) problems.Add("루트 진입 조건 배지 갱신 실패: " + set.ConditionBadge);
-            if (TxtRouteCondHeader.Text.IndexOf("진입 조건", StringComparison.Ordinal) < 0) problems.Add("루트 진입 조건 헤더 문구 없음: " + TxtRouteCondHeader.Text);
 
             // 2) 기본 루트 라디오(트랙당 1개) + 벌 수 상태 텍스트
             var set2 = AddRouteSet();
@@ -2560,7 +2522,7 @@ namespace WindBotAIEditor
             RenumberRoute();
             SelectRouteOption(null);
             UpdateRouteTrackUi();
-            SelectRuleTab(4);            // ⑤ 로 복귀 (원래 탭 인덱스는 아래에서 복원)
+            SelectRuleTab(5);            // ⑤ 로 복귀 (원래 탭 인덱스는 아래에서 복원)
             SetRouteTrack(oldTrack);
             Relayout();
             if (_routes.Count != beforeSetsFirst || _routesSecond.Count != beforeSetsSecond) problems.Add("원상 복구 실패(루트 벌 수)");
@@ -2588,7 +2550,7 @@ namespace WindBotAIEditor
             }
             // 8) ② 선택 규칙 조건(B-6): 그리드 연결 · 배지 · 코드 게이트 · JSON 왕복
             int beforeChoices = _choices.Count;
-            SelectRuleTab(1);
+            SelectRuleTab(2);
             Relayout();
             OnAddChoice(null, null);
             var addedChoice = SelectedChoice;
@@ -2628,7 +2590,7 @@ namespace WindBotAIEditor
 
             // 9) ② 선택 규칙 확장(B-14): 테마 카드 우선 / 옵션 desc / 조건 부정·몬스터만
             int beforeB14 = _choices.Count;
-            SelectRuleTab(1);
+            SelectRuleTab(2);
             Relayout();
             foreach (var need in new[] { "옵션desc", "테마 (우선)", "몬스터만", "제외 카드 추가", "제외 목록" })
                 if (!GridChoices.Columns.Any(col => Convert.ToString(col.Header) == need))
@@ -2728,7 +2690,7 @@ namespace WindBotAIEditor
             }
             if (_choices.Count != beforeB14) problems.Add("B-14 원상 복구 실패(선택 규칙 수)");
 
-            SelectRuleTab(4);
+            SelectRuleTab(5);
             Tabs.SelectedIndex = oldTab;      // 호출 전 탭으로 복원
             Relayout();
 
@@ -2754,6 +2716,7 @@ namespace WindBotAIEditor
                 var setIdx = MainTabIndex("⚙ AI 설정");
                 if (setIdx < 0) { problems.Add("B-15: ⚙ AI 설정 탭을 찾을 수 없음"); return problems; }
                 Tabs.SelectedIndex = setIdx;
+                SelectRuleTab(0);                    // 2026-11-02: 설정 카드는 `0. 기본 · 전역` 서브탭 안에 있다
                 SetSettingsCollapsed(false);
                 MeasureAt(1100, 700);
 
@@ -3988,7 +3951,7 @@ namespace WindBotAIEditor
         /// 2026-11-01: 그룹 배지 갱신 — 같은 **연속된** 그룹의 첫 행 `(n`, 마지막 행 `n)`, 가운데 `n`, 한 행뿐이면 `(n)`.
         /// 0(기본)은 `—`. 그룹은 "연속된 같은 번호" 단위다.
         /// </summary>
-        private static void RefreshGroupBadges(System.Collections.IEnumerable? list)
+        public static void RefreshGroupBadges(System.Collections.IEnumerable? list)
         {
             if (list == null) return;
             var items = new List<Condition>();
@@ -4021,6 +3984,10 @@ namespace WindBotAIEditor
         /// 2026-11-01: 조건 그리드를 선택/편집하면 **생성될 C# 식**을 상태줄에 보여준다.
         /// 그룹(괄호)이 의도대로 묶였는지 확인하는 가장 확실한 방법(예: `Duel.IsFirst && (A || B)`).
         /// </summary>
+        /// <summary>
+        /// 2026-11-02 (B-80): 조건 그리드를 선택/편집하면 **생성식 미리보기 바**(①②③ 공통, RuleTabs 아래 고정)에
+        /// 지금 조건이 어떤 C# 식으로 생성되는지 보여준다. 그룹(괄호)까지 그대로 확인할 수 있다.
+        /// </summary>
         private void OnCondGridPreview(object sender, EventArgs e)
         {
             try
@@ -4028,14 +3995,52 @@ namespace WindBotAIEditor
                 var grid = sender as DataGrid;
                 if (grid == null) return;
                 var list = grid.ItemsSource as System.Collections.IEnumerable;
-                if (list == null) return;
                 var conds = new List<Condition>();
-                foreach (var it in list) { if (it is Condition c) conds.Add(c); }
-                if (conds.Count == 0) return;
-                RefreshGroupBadges(list);
-                Status("조건식: " + RuleCodeGen.PreviewConditions(conds));
+                if (list != null) { foreach (var it in list) { if (it is Condition c) conds.Add(c); } }
+                if (list != null) RefreshGroupBadges(list);
+                string area = CondAreaName(grid);
+                if (conds.Count == 0) { ShowCondPreview("", 0, area); return; }
+                string expr = RuleCodeGen.PreviewConditions(conds);
+                Status("조건식: " + expr);
+                ShowCondPreview(expr, conds.Count, area);
             }
             catch { /* 미리보기는 실패해도 무해 */ }
+        }
+
+        private string _lastCondExpr = "";
+
+        /// <summary>어느 탭의 조건인지(①②③) — 미리보기 접두.</summary>
+        private string CondAreaName(DataGrid g)
+        {
+            if (object.ReferenceEquals(g, GridConds)) return "① 행동 조건";
+            if (object.ReferenceEquals(g, GridChoiceConds)) return "② 선택 조건";
+            if (object.ReferenceEquals(g, GridForbidConds)) return "③ 금지 조건";
+            return "조건";
+        }
+
+        /// <summary>생성식 미리보기 바 갱신 (비어 있으면 안내 문구).</summary>
+        private void ShowCondPreview(string expr, int count, string area)
+        {
+            _lastCondExpr = expr ?? "";
+            try
+            {
+                if (TxtCondPreview == null) return;
+                TxtCondPreview.Text = string.IsNullOrEmpty(_lastCondExpr)
+                    ? "조건이 없습니다 (" + area + ") — 조건을 추가하거나 행을 선택하세요. 조건이 비면 생성식은 true 입니다"
+                    : area + " · 조건 " + count + "개 · " + _lastCondExpr;
+            }
+            catch { /* 표시 실패는 무해 */ }
+        }
+
+        private void OnCopyCondExpr(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_lastCondExpr)) { Status("복사할 조건식이 없습니다 — 조건 행을 먼저 선택하세요"); return; }
+            try
+            {
+                Clipboard.SetText(_lastCondExpr);
+                Status("조건식 복사: " + _lastCondExpr);
+            }
+            catch (Exception ex) { Status("복사 실패: " + ex.Message); }
         }
 
         // ================= 봇 대사 (Dialogs/*.json) =================

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -45,10 +45,26 @@ namespace WindBotAIEditor.Services
         public static bool IsValidIdentifier(string name) =>
             !string.IsNullOrWhiteSpace(name) && Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*$");
 
-        public static string ClassName(string engineName) =>
-            engineName.EndsWith("Executor", StringComparison.OrdinalIgnoreCase)
-                ? engineName
-                : engineName + "Executor";
+        /// <summary>
+        /// 엔진(덱) 이름 → C# 클래스 이름.
+        /// 2026-11-02: 덱 이름에 **공백/기호**가 있어도 된다(`[Deck("Sun God Time Wizard", ...)]`).
+        /// 클래스 이름만 식별자로 정리한다(공백·기호 제거, 숫자로 시작하면 앞에 `_`).
+        /// </summary>
+        public static string ClassName(string engineName)
+        {
+            var raw = (engineName ?? "").Trim();
+            if (raw.EndsWith("Executor", StringComparison.OrdinalIgnoreCase)) raw = raw.Substring(0, raw.Length - 8);
+            var sb = new StringBuilder();
+            foreach (var ch in raw)
+            {
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')
+                    sb.Append(ch);
+            }
+            var name = sb.ToString();
+            if (name.Length == 0) name = "Deck";
+            if (name[0] >= '0' && name[0] <= '9') name = "_" + name;
+            return name + "Executor";
+        }
 
         public static string GenerateSource(BuildRequest req)
         {
@@ -310,5 +326,6 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
 
 

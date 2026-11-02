@@ -13,8 +13,25 @@ namespace WindBotAIEditor.Services
     /// </summary>
     public static class RuleCodeGen
     {
-        public static string ClassName(string engine) =>
-            engine.EndsWith("Executor", StringComparison.OrdinalIgnoreCase) ? engine : engine + "Executor";
+        /// <summary>
+        /// 엔진 이름 → 클래스 이름. 2026-11-02: 덱 이름에 공백/기호가 있어도 되도록 **식별자로 정리**한다
+        /// (`PluginBuilder.ClassName` 과 동일 규칙을 써야 생성 코드·검증·빌드가 일치한다).
+        /// </summary>
+        public static string ClassName(string engine)
+        {
+            var raw = (engine ?? "").Trim();
+            if (raw.EndsWith("Executor", StringComparison.OrdinalIgnoreCase)) raw = raw.Substring(0, raw.Length - 8);
+            var sb = new System.Text.StringBuilder();
+            foreach (var ch in raw)
+            {
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')
+                    sb.Append(ch);
+            }
+            var name = sb.ToString();
+            if (name.Length == 0) name = "Deck";
+            if (name[0] >= '0' && name[0] <= '9') name = "_" + name;
+            return name + "Executor";
+        }
 
         private static int PolicyId(string pick) => pick switch
         {
@@ -96,6 +113,10 @@ namespace WindBotAIEditor.Services
             var themePickRules = choices.Where(c => c.Pick == "themeMatch").ToList();
             // B-17: 선택 정책 "발동 중인 카드(체인)" 규칙 (우선순위 순서 = PickChainCard_<n> 번호)
             var chainPickRules = choices.Where(c => c.Pick == "chainCard").ToList();
+            // B-76 (2026-11-02): 선택 정책 "루트 다음 단계 카드" 규칙 (우선순위 순서 = PickRouteNext_<n> 번호)
+            var routePickRules = choices.Where(c => c.Pick == "routeNext").ToList();
+            //   같은 이름 카드(별칭) 판정 헬퍼가 생성되는지 여부 — Pick/헬퍼가 이를 맞춰 쓴다
+            bool useAliasForPick = choices.Any(ch => ch != null && ch.Pick == "codeMatch" && ch.Card > 0);
             // B-22: 제외 카드(excludeCards)가 있는 SelectCard 규칙 — 정책과 무관하게 후보를 먼저 거른다
             //   (우선순위 순서 = ExcludeCodes_<n> 번호, 중복 정의 방지 위해 참조 중복 제거)
             var excludePickRules = new List<ChoiceRule>();
@@ -120,6 +141,8 @@ namespace WindBotAIEditor.Services
             // 후공 트랙이 비어 있으면 선공 트랙을 그대로 쓴다 (B-4 동작 유지)
             bool secondUsesFirst = hasFirstRoute && !hasSecondRoute;
             bool hasAnyRoute = hasFirstRoute || hasSecondRoute;
+            // B-73: 루트 순서 강제 — ① 행동에 RoutePending 게이트를 붙인다 (루트 없음/옵션 OFF → 0줄)
+            bool routeGate = hasAnyRoute && p.RouteAuthoritative;
             // 후공 트랙이 실제로 만들 루트 목록 (비었으면 선공 목록을 복제)
             var secondEmitSets = secondUsesFirst ? firstSets : secondSets;
 
@@ -151,6 +174,7 @@ namespace WindBotAIEditor.Services
             bool needDestroyVsImmune = p.SkipDestructImmuneDestroy
                                        && p.DestructibleImmuneCards != null && p.DestructibleImmuneCards.Count > 0
                                        && p.DestroyCardIds != null && p.DestroyCardIds.Count > 0;
+            bool hasEffectBlockHelper = effectBlocks.Count > 0 || needNegateVsImmune || needDestroyVsImmune;   // IsForbiddenEffect 가 실제로 생성되는 조건과 동일
             // 2026-11-01: "이번 턴 효과를 사용한 몬스터" 추적이 필요한가 (조건 enemyUnusedEffectCount / ② 필터 skipEffectUsed)
             bool needEffectUsed = UsesEffectUsed(p, choices, firstSets, secondSets);
             bool protectExtra = p.FreePlayProtectExtra;   // B-16: 릴리스/제물에서 엑스트라 덱 몬스터 제외
@@ -177,6 +201,12 @@ namespace WindBotAIEditor.Services
                                       || actions.Any(a => (a.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"))
                                       || forbids.Any(f => (f.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"))
                                       || choices.Any(ch => (ch.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "chainHasCard"));
+
+            // 2026-11-02: "이번 턴 내가 발동한 카드" 조건은 _usedActivated / IsActivatedThisTurn 헬퍼를 필요로 한다
+            bool needActivatedThisTurn =
+                actions.Any(a => (a.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "myCardActivatedThisTurn"))
+                || forbids.Any(f => (f.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "myCardActivatedThisTurn"))
+                || choices.Any(ch => (ch.Conditions ?? new List<Condition>()).Any(cc => cc.Kind == "myCardActivatedThisTurn"));
 
             sb.AppendLine("// WindBot AI Editor — rule-generated executor (schema v11)");
             sb.AppendLine("// engine : " + cls);
@@ -233,6 +263,26 @@ namespace WindBotAIEditor.Services
             if (!string.IsNullOrWhiteSpace(p.DialogFile))
                 sb.AppendLine("            ApplyDialogs(AI);   // 이 엔진 전용 대사 적용");
 
+            // ---- 2026-11-03: 항상 최우선 액션 (루트 게이트 무시) — 루트 단계 실행기보다 먼저 등록 ----
+            {
+                var earlyActs = actions.Where(x => x.AlwaysFirst).ToList();
+                foreach (var ea in earlyActs)
+                {
+                    if (!string.IsNullOrWhiteSpace(ea.Note))
+                        sb.AppendLine("            // " + OneLine(ea.Note) + "   [P" + ea.Priority + "·우선]");
+                    var eids = ea.Card > 0 ? AliasIds(ea.Card) : new int[0];
+                    if (ea.Card <= 0)
+                    {
+                        sb.AppendLine("            " + ActionCall(ea, 0, stopOthers, effectBlocks.Count > 0, false) + ";");
+                    }
+                    else
+                    {
+                        foreach (var ecid in eids)
+                            sb.AppendLine("            " + ActionCall(ea, ecid, stopOthers, effectBlocks.Count > 0, false) + ";");
+                    }
+                }
+            }
+
             // ---- 전개 루트 (가장 먼저) ----
             if (hasFirstRoute)
                 EmitRouteRegistrations(sb, firstSets, false);
@@ -266,6 +316,7 @@ namespace WindBotAIEditor.Services
             // ---- 행동 규칙 ----
             foreach (var a in actions)
             {
+                if (a.AlwaysFirst) continue;   // 2026-11-03: 루트보다 먼저 등록하는 액션(별도 배출)
                 if (!string.IsNullOrWhiteSpace(a.Note))
                     sb.AppendLine("            // " + OneLine(a.Note) + "   [P" + a.Priority + "]");
                 var cardIds = a.Card > 0 ? AliasIds(a.Card) : new int[0];
@@ -273,12 +324,12 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("            //   같은 이름 카드 " + cardIds.Count + "개: " + string.Join(", ", cardIds.Select(x => x.ToString()).ToArray()));
                 if (a.Card <= 0)
                 {
-                    sb.AppendLine("            " + ActionCall(a, 0, stopOthers, effectBlocks.Count > 0) + ";");
+                    sb.AppendLine("            " + ActionCall(a, 0, stopOthers, effectBlocks.Count > 0, false) + ";");
                 }
                 else
                 {
                     foreach (var cid in cardIds)
-                        sb.AppendLine("            " + ActionCall(a, cid, stopOthers, effectBlocks.Count > 0) + ";");
+                        sb.AppendLine("            " + ActionCall(a, cid, stopOthers, effectBlocks.Count > 0, routeGate && !a.AlwaysFirst) + ";");
                 }
             }
 
@@ -770,7 +821,7 @@ namespace WindBotAIEditor.Services
             }
             // ---- 상태 필드 / OnChaining / OnNewTurn ----
             bool emitsSecondRoute = hasSecondRoute || secondUsesFirst;
-            if (opps.Count > 0 || hasAnyRoute || avoidColumnCard > 0 || needEffectUsed)
+            if (opps.Count > 0 || hasAnyRoute || avoidColumnCard > 0 || needEffectUsed || needActivatedThisTurn)
             {
                 sb.AppendLine();
                 foreach (var o in opps)
@@ -784,11 +835,34 @@ namespace WindBotAIEditor.Services
                 {
                     sb.AppendLine("        private int _routeSetSecond = -1;  // 후공: -1 미선택 / 0..N-1 / -2 없음(전개 안 함)");
                     sb.AppendLine("        private int _routeStepSecond = 0;  // 후공 단계 커서 (-1 = 이번 턴 전개 종료)");
+            }
+            // 2026-11-02 (⑤ 루트 목표): 재선택 제외 인덱스 / 턴당 1회 재선택
+            if (hasFirstRoute) sb.AppendLine("        private int _routeSkipFirst = -1;");
+            if (emitsSecondRoute) sb.AppendLine("        private int _routeSkipSecond = -1;");
+            sb.AppendLine("        private bool _routeReselectTried;    // 턴당 1회만 재선택");
+            {
                 }
                 if (needEffectUsed)
                 {
                     sb.AppendLine("        // 2026-11-01: 이번 턴 효과를 발동한 **상대 몬스터** (카드ID|존) — 이미 효과를 쓴 몬스터에 뵐러/포영을 쓰지 않게 한다");
                     sb.AppendLine("        private readonly List<long> _usedEffectKeys = new List<long>();");
+                }
+                if (hasAnyRoute || needActivatedThisTurn)
+                {
+                    sb.AppendLine("        // 2026-11-02 (E): 이번 턴 **내가 발동한** 카드 ID — 묘지 발동(도굴꾼 등)은 '이번 턴 미발동'일 때만 후보로 본다");
+                    sb.AppendLine("        private readonly List<int> _usedActivated = new List<int>();");
+                    sb.AppendLine();
+                    sb.AppendLine("        private void MarkMyActivated(ClientCard c)");
+                    sb.AppendLine("        {");
+                    sb.AppendLine("            if (c == null) return;");
+                    sb.AppendLine("            if (!_usedActivated.Contains(c.Id)) _usedActivated.Add(c.Id);");
+                    sb.AppendLine("        }");
+                    sb.AppendLine();
+                    sb.AppendLine("        private bool IsActivatedThisTurn(int code)");
+                    sb.AppendLine("        {");
+                    sb.AppendLine("            for (int i = 0; i < _usedActivated.Count; i++) if (_usedActivated[i] == code) return true;");
+                    sb.AppendLine("            return false;");
+                    sb.AppendLine("        }");
                 }
                 sb.AppendLine();
 
@@ -835,7 +909,7 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("        }");
                 sb.AppendLine();
             }
-                if (opps.Count > 0 || avoidColumnCard > 0 || needEffectUsed)
+                if (opps.Count > 0 || avoidColumnCard > 0 || needEffectUsed || hasAnyRoute || needActivatedThisTurn)
                 {
                     sb.AppendLine("        public override void OnChaining(int player, ClientCard card)");
                     sb.AppendLine("        {");
@@ -861,12 +935,17 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            // 상대 **몬스터가 필드에서** 효과를 발동하면 기억한다(패/묘지 발동은 대상이 될 수 없으므로 제외)");
                         sb.AppendLine("            if (card != null && card.Controller != 0 && card.Location == CardLocation.MonsterZone) MarkEffectUsed(card);");
                     }
+                    if (hasAnyRoute || needActivatedThisTurn)
+                    {
+                        sb.AppendLine("            // 2026-11-02 (E): 내가 발동한 카드도 기록 — 묘지로 간 뒤 '이미 쓴 카드'를 다시 단계로 잡지 않게");
+                        sb.AppendLine("            if (card != null && player == 0) MarkMyActivated(card);");
+                    }
                     sb.AppendLine("            base.OnChaining(player, card);");
                     sb.AppendLine("        }");
                     sb.AppendLine();
                 }
 
-                if (opps.Count > 0 || hasAnyRoute || needEffectUsed)
+                if (opps.Count > 0 || hasAnyRoute || needEffectUsed || needActivatedThisTurn)
                 {
                     sb.AppendLine("        public override void OnNewTurn()");
                     sb.AppendLine("        {");
@@ -883,13 +962,22 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            _routeStepSecond = 0;  // 후공 루트 처음부터");
                     }
                     if (needEffectUsed) sb.AppendLine("            _usedEffectKeys.Clear();   // 새 턴 — 효과 사용 기록 초기화");
+                    if (hasAnyRoute || needActivatedThisTurn)
+                    {
+                        sb.AppendLine("            _usedActivated.Clear();    // 새 턴 — 내 발동 기록 초기화");
+            sb.AppendLine("            _routeReselectTried = false;   // 새 턴 — 재선택 1회 허용");
+                        sb.AppendLine("            // 2026-11-02 (E): **턴 시작에** 루트를 확정한다 — 늦게 고르면 이미 쓴 카드(스탠바이 발동 등)의");
+                        sb.AppendLine("            //   단계에 커서가 갇혀 루트가 무력화되던 문제(20-41-02 리플레이)를 막는다.");
+                        if (hasFirstRoute) sb.AppendLine("            SelectRouteFirst();");
+                        if (emitsSecondRoute) sb.AppendLine("            SelectRouteSecond();");
+                    }
                     sb.AppendLine("            base.OnNewTurn();");
                     sb.AppendLine("        }");
                 }
             }
 
             // ---- 전개 루트: 선공/후공 게이트 + 루트 선택 + 단계 메서드 ----
-            if (hasAnyRoute)
+            if (hasAnyRoute || needActivatedThisTurn)
             {
                 sb.AppendLine();
                 sb.AppendLine("        // ---- 전개 루트 선공/후공 게이트 (amFirst / amSecond 와 같은 판정) ----");
@@ -908,7 +996,8 @@ namespace WindBotAIEditor.Services
                     sb.AppendLine("            return !Duel.IsFirst;");
                     sb.AppendLine("        }");
                 }
-            }
+        }
+
             if (hasFirstRoute)
                 EmitRouteSelect(sb, firstSets, false);
             if (emitsSecondRoute)
@@ -921,9 +1010,16 @@ namespace WindBotAIEditor.Services
                 EmitRouteSelect(sb, secondEmitSets, true);
             }
             if (hasFirstRoute)
-                EmitRouteMethods(sb, firstSets, false);
+                EmitRouteMethods(sb, firstSets, false, hasEffectBlockHelper);
             if (emitsSecondRoute)
-                EmitRouteMethods(sb, secondEmitSets, true);
+                EmitRouteMethods(sb, secondEmitSets, true, hasEffectBlockHelper);
+
+            // ---- B-73: 루트 순서 강제 (① 액션이 루트 단계를 앞지르지 못하게) ----
+            if (routeGate || (p.RouteGuard && (hasFirstRoute || hasSecondRoute)))
+                EmitRoutePending(sb, firstSets, hasFirstRoute, secondEmitSets, emitsSecondRoute, p.RouteGuard,
+                    routePickRules, useAliasForPick, p.DebugEffectLog, actions);
+            else if (routePickRules.Count > 0)
+                EmitRouteNextHelpers(sb, routePickRules, false, false, useAliasForPick, p.DebugEffectLog);
 
             // ---- 발동 금지 ----
             bool needPreActivate = forbidActivate.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0 || chainLimits.Count > 0 || forbidChainToMine.Count > 0 || avoidColumnCard > 0;
@@ -1100,6 +1196,8 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            if (hint == HintMsg.Destroy) allowedCards = FilterDestructImmune(allowedCards, min);   // 2026-11-01: 파괴 선택에서 파괴 안 되는 카드 제외(전부 불가면 원본)");
                     if (needEffectImmuneFilter)
                         sb.AppendLine("            if (hint != HintMsg.Release) allowedCards = FilterEffectImmune(allowedCards, min);   // 2026-11-02: 효과 면역 카드 대상 제외(릴리스는 예외)");
+                        if (isSelectCard && p.RouteGuard && (hasFirstRoute || hasSecondRoute))
+                            sb.AppendLine("            if (hint == HintMsg.Release || hint == HintMsg.Discard || hint == HintMsg.FusionMaterial || hint == HintMsg.SynchroMaterial || hint == HintMsg.XyzMaterial || hint == HintMsg.LinkMaterial || hint == HintMsg.DeattachFrom) allowedCards = FilterRouteProtected(allowedCards, min);   // 2026-11-02 (⑤): 루트 잔여 단계 카드를 코스트/소재에서 보호");
                     if (isSelectCard)
                     {
                         if (forbidTarget.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0)
@@ -1217,11 +1315,21 @@ namespace WindBotAIEditor.Services
                         sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterNotEffectUsed(" + euSrc + ");   // 이번 턴 효과 사용 몬스터 제외");
                     }
 
+                    // B-77 (2026-11-02): 상대 카드만 — 내 카드를 소재/대상으로 쓰지 않게
+                    bool enemyOnlyFilter = isSelectCard && c.OnlyEnemy;
+                    if (enemyOnlyFilter)
+                    {
+                        string oeSrc = (effectUsedFilter || faceUpFilter || faceDownFilter || disabledFilter || resistFilter) ? ruleSrc : (xi > 0 ? "pool" + xi : srcList);
+                        ruleSrc = "oe" + (emitted + 1);
+                        sb.AppendLine("            IList<ClientCard> " + ruleSrc + " = FilterEnemyOnly(" + oeSrc + ");   // 상대 카드만");
+                    }
+
                     var parts = new List<string>();
                     if (xi > 0) parts.Add("pool" + xi + ".Count >= min");                          // 후보 부족 → 다음 규칙
-                    if (resistFilter || disabledFilter || faceDownFilter || faceUpFilter || effectUsedFilter) parts.Add(ruleSrc + ".Count >= min");   // 필터 후 부족 → 다음 규칙
+                    if (resistFilter || disabledFilter || faceDownFilter || faceUpFilter || effectUsedFilter || enemyOnlyFilter) parts.Add(ruleSrc + ".Count >= min");   // 필터 후 부족 → 다음 규칙
                     if (c.WhenCard > 0)
-                        parts.Add(WhenCardExpr(c.WhenCard));   // B-33: Card/ActivatingCard/체인 링크 모두 확인
+                        // 2026-11-02: routeNext 는 **그 카드 자신의 프롬프트**에서만 (InChain 으로 남의 프롬프트를 가로채지 않게)
+                        parts.Add(c.Pick == "routeNext" ? WhenCardExprNoChain(c.WhenCard) : WhenCardExpr(c.WhenCard));
                     var mc = maxCond(c);
                     if (mc.Length > 0) parts.Add(mc);
                     var hc = hintCond(c);
@@ -1249,9 +1357,20 @@ namespace WindBotAIEditor.Services
                         parts.Add($"PickChainCard_{ci}({ruleSrc}, 1).Count > 0");
                     }
 
+                    // B-76 (2026-11-02): 루트 다음 단계 카드 우선 — 루트가 곧 필요로 하는 카드가 후보에 없으면 다음 규칙으로
+                    var routeCall = "";
+                    if (c.Pick == "routeNext")
+                    {
+                        int ri = routePickRules.IndexOf(c) + 1;
+                        routeCall = $"PickRouteNext_{ri}({ruleSrc}, {sig.MaxExpr})";
+                        parts.Add($"PickRouteNext_{ri}({ruleSrc}, 1).Count > 0");
+                    }
+
                     var call = c.Pick == "themeMatch"
                         ? themeCall
-                        : (c.Pick == "chainCard" ? chainCall : $"Pick({ruleSrc}, {sig.MaxExpr}, {PolicyId(c.Pick)}, {c.Card})");
+                        : (c.Pick == "chainCard" ? chainCall
+                        : (c.Pick == "routeNext" ? routeCall
+                        : $"Pick({ruleSrc}, {sig.MaxExpr}, {PolicyId(c.Pick)}, {c.Card})"));
                     if (parts.Count == 0)
                     {
                         if (p.DebugEffectLog && isSelectCard)
@@ -1300,10 +1419,15 @@ namespace WindBotAIEditor.Services
                 bool done = false;
                 foreach (var r in yesNoRules)
                 {
+                    // B-84 (2026-11-02): 단일 결과 콜백도 **발동 카드(whenCard)로 게이트**한다.
+                    //   이전에는 조건(conditions)만 봐서, 조건 없는 whenCard 규칙이 **모든 YesNo** 를 가로챘다.
+                    var parts = new List<string>();
+                    if (r.WhenCard > 0) parts.Add(WhenCardExpr(r.WhenCard));   // Card / ActivatingCard() / InChain
                     var gate = ChoiceGate(r);
+                    if (gate != null) parts.Add(gate);
                     var body = "return " + (r.YesNo ? "true" : "false") + ";";
-                    if (gate == null) { sb.AppendLine("            " + body); done = true; break; }
-                    sb.AppendLine("            if (" + gate + ") " + body);
+                    if (parts.Count == 0) { sb.AppendLine("            " + body); done = true; break; }
+                    sb.AppendLine("            if (" + string.Join(" && ", parts) + ") " + body);
                 }
                 if (!done) sb.AppendLine("            return base.OnSelectYesNo(desc);   // 조건 불충족 → 기본 동작");
                 sb.AppendLine("        }");
@@ -1507,6 +1631,8 @@ namespace WindBotAIEditor.Services
             bool needOnField = allConds.Any(c => c.Kind == "hasOnField") || triggers.Count > 0;
             bool needAttacking = allConds.Any(c => c.Kind == "enemyAttackingCount");
             bool needFaceUp = allConds.Any(c => c.Kind == "enemyFaceUpCount" || c.Kind == "myFaceUpCount");
+            bool needFaceUpMonster = allConds.Any(c => c.Kind == "enemyFaceUpMonsterCount" || c.Kind == "myFaceUpMonsterCount");   // B-77
+            bool needExtraMonster = allConds.Any(c => c.Kind == "fieldHasExtraMonster");   // 2026-11-02 (A)
             bool needFaceDown = allConds.Any(c => c.Kind == "enemyFaceDownCount" || c.Kind == "myFaceDownCount");
             bool needFaceUpSpell = allConds.Any(c => c.Kind == "enemyFaceUpSpellCount");   // 2026-11-01
             bool needSetSpell = allConds.Any(c => c.Kind == "mySetCount");   // 2026-10-30
@@ -1514,10 +1640,12 @@ namespace WindBotAIEditor.Services
             bool needDestructible = allConds.Any(c => c.Kind == "enemyDestructibleCount" || c.Kind == "myDestructibleCount");
             bool needFacedownCard = allConds.Any(c => c.Kind == "fieldHasFacedownCard" || c.Kind == "hasInHandOrSet");   // 2026-11-01
             bool needHandOrSet = allConds.Any(c => c.Kind == "hasInHandOrSet");
+            bool needCardCount = allConds.Any(c => c.Kind == "cardCount");   // 2026-11-02
             bool needXyzMats = allConds.Any(c => c.Kind == "xyzMaterialAtLeast");   // 2026-11-01
             bool needLevel = allConds.Any(c => c.Kind == "fieldHasLevel");
             bool needLevelCount = allConds.Any(c => c.Kind == "fieldLevelCount");   // B-20
             bool needEmz = allConds.Any(c => c.Kind == "fieldCardInEmz");           // B-20
+            bool needMonsterZoneCard = allConds.Any(c => c.Kind == "fieldCardInMonsterZone");   // 2026-11-02
             bool needPendulum = allConds.Any(c => c.Kind == "fieldHasPendulum" || c.Kind == "pendulumScale");   // N-6
             bool needRank = allConds.Any(c => c.Kind == "fieldHasRank");
             bool needLink = allConds.Any(c => c.Kind == "fieldHasLink");
@@ -1547,6 +1675,7 @@ namespace WindBotAIEditor.Services
             // 2026-10-30: 뒷면 제외 / 앞면만 (skipFaceDown · onlyFaceUp)
             bool needFaceDownFilter = choices.Any(c => c.On == "SelectCard" && c.SkipFaceDown);
             bool needFaceUpFilter = choices.Any(c => c.On == "SelectCard" && c.OnlyFaceUp);
+            bool needEnemyOnlyFilter = choices.Any(c => c.On == "SelectCard" && c.OnlyEnemy);   // B-77 (2026-11-02)
             // 2026-10-30: 대상 기준 무효 판정 (chainLastDisabled / chainHasDisabled) — 쓰는 것만 배출
             bool needChainLastDisabled = allConds.Any(c => c.Kind == "chainLastDisabled");
             bool needChainHasDisabled = allConds.Any(c => c.Kind == "chainHasDisabled");
@@ -1596,6 +1725,30 @@ namespace WindBotAIEditor.Services
                 "            }",
                 "            return n;"));
 
+            if (needExtraMonster) sb.Append(StaticHelper("FieldHasExtraMonster", "bool", "ClientField f",
+                "            if (f == null) return false;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c == null) continue;",
+                "                if ((c.Type & 0x40) != 0) return true;        // 융합",
+                "                if ((c.Type & 0x2000) != 0) return true;      // 싱크로",
+                "                if ((c.Type & 0x800000) != 0) return true;    // 엑시즈",
+                "                if ((c.Type & 0x4000000) != 0) return true;   // 링크",
+                "            }",
+                "            return false;"));
+            if (needFaceUpMonster) sb.Append(StaticHelper("CountFaceUpMonster", "int", "ClientField f",
+                "            int n = 0;",
+                "            if (f == null) return 0;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c == null) continue;",
+                "                if (((int)c.Position & 0x5) == 0) continue;   // 뒷면 제외",
+                "                if ((c.Type & 0x4000) != 0) continue;          // 토큰 제외(소재로 못 쓴다)",
+                "                n++;",
+                "            }",
+                "            return n;"));
             if (needFaceDown) sb.Append(StaticHelper("CountFaceDown", "int", "ClientField f",
                 "            int n = 0;",
                 "            for (int i = 0; i < f.MonsterZone.Length; i++)",
@@ -1795,6 +1948,15 @@ namespace WindBotAIEditor.Services
                 "                if (c != null && c.IsCode(code)) return true;",
                 "            }",
                 "            return false;"));
+            // 2026-11-02: 몬스터존(메인 5 + 엑몹 2)에 특정 카드가 있는지 — 갓 슬라임처럼 함정→몬스터 카드 판정용
+            if (needMonsterZoneCard) sb.Append(StaticHelper("FieldHasCardInMonsterZone", "bool", "ClientField f, int code",
+                "            if (f == null || f.MonsterZone == null) return false;",
+                "            for (int i = 0; i < f.MonsterZone.Length; i++)",
+                "            {",
+                "                ClientCard c = f.MonsterZone[i];",
+                "                if (c != null && c.IsCode(code)) return true;",
+                "            }",
+                "            return false;"));
             // B-20: 필드에서 특정 레벨 몬스터가 몇 장인지 (level 0 = 레벨 무관 = 모든 몬스터)
             if (needLevelCount) sb.Append(StaticHelper("CountLevels", "int", "ClientField f, int level, bool onlyMonster",
                 "            if (f == null || f.MonsterZone == null) return 0;",
@@ -1846,7 +2008,7 @@ namespace WindBotAIEditor.Services
             if (needSetcode) EmitHasSetcodeHelper(sb);
             if (needResistFilter) EmitResistFilterHelper(sb, p.DebugEffectLog);
             if (needDisabledFilter) EmitDisabledFilterHelper(sb, p.DebugEffectLog);
-            if (needFaceDownFilter || needFaceUpFilter) EmitFaceFilterHelpers(sb, needFaceDownFilter, needFaceUpFilter, p.DebugEffectLog);   // 2026-10-30
+            if (needFaceDownFilter || needFaceUpFilter || needEnemyOnlyFilter) EmitFaceFilterHelpers(sb, needFaceDownFilter, needFaceUpFilter, needEnemyOnlyFilter, p.DebugEffectLog);   // 2026-10-30 (B-77 상대만)
             if (needEffectUsed) EmitEffectUsedHelpers(sb, p.DebugEffectLog);   // 2026-11-01: 이번 턴 효과 사용 몬스터
             if (needChainLastDisabled || needChainHasDisabled) EmitChainDisabledHelpers(sb, needChainLastDisabled, needChainHasDisabled);   // 2026-10-30
             if (needChainLastMonster) EmitChainLastMonsterHelper(sb);   // 2026-11-01: 체인 마지막 = 상대 필드 몬스터
@@ -1868,6 +2030,21 @@ namespace WindBotAIEditor.Services
                 if (codeMatchGroups.Count > 0) EmitAliasCodeMatchHelper(sb, codeMatchGroups);
 
                 sb.AppendLine("        // policy: 0=목록순 1=공격력↓ 2=공격력↑ 3=수비력↓ 4=레벨↑ 5=특정카드우선");
+            // 2026-11-02: 특정 카드의 (패 + 필드 + 묘지 + 제외) 합계 — 덱 레시피 장수와 비교해 "덱에 남았는지" 판정용
+            if (needCardCount)
+            {
+                bool useAlias = codeMatchGroups.Count > 0;
+                string match = useAlias ? "IsCodeAlias(c, code)" : "c.IsCode(code)";
+                sb.Append(StaticHelper("CountCard", "int", "ClientField f, int code",
+                    "            if (f == null) return 0;",
+                    "            int n = 0;",
+                    "            if (f.Hand != null) for (int i = 0; i < f.Hand.Count; i++) { ClientCard c = f.Hand[i]; if (c != null && " + match + ") n++; }",
+                    "            for (int i = 0; i < f.MonsterZone.Length; i++) { ClientCard c = f.MonsterZone[i]; if (c != null && " + match + ") n++; }",
+                    "            for (int i = 0; i < f.SpellZone.Length; i++) { ClientCard c = f.SpellZone[i]; if (c != null && " + match + ") n++; }",
+                    "            if (f.Graveyard != null) for (int i = 0; i < f.Graveyard.Count; i++) { ClientCard c = f.Graveyard[i]; if (c != null && " + match + ") n++; }",
+                    "            if (f.Banished != null) for (int i = 0; i < f.Banished.Count; i++) { ClientCard c = f.Banished[i]; if (c != null && " + match + ") n++; }",
+                    "            return n;"));
+            }
                 sb.AppendLine("        private static IList<ClientCard> Pick(IList<ClientCard> cards, int max, int policy, int code)");
                 sb.AppendLine("        {");
                 sb.AppendLine("            List<ClientCard> pool = new List<ClientCard>(cards);");
@@ -2669,7 +2846,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                if (UsedEffect(c)) continue;");
             sb.AppendLine("                result.Add(c);");
             sb.AppendLine("            }");
-            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipEffectUsed before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+            if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] skipEffectUsed before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -2689,7 +2866,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                if (c.IsDisabled()) continue;");
             sb.AppendLine("                result.Add(c);");
             sb.AppendLine("            }");
-            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipDisabled before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+            if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] skipDisabled before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -2753,7 +2930,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine();
         }
 
-        private static void EmitFaceFilterHelpers(StringBuilder sb, bool withNotFaceDown, bool withFaceUpOnly, bool debugLog)
+        private static void EmitFaceFilterHelpers(StringBuilder sb, bool withNotFaceDown, bool withFaceUpOnly, bool withEnemyOnly, bool debugLog)
         {
             if (withNotFaceDown)
             {
@@ -2769,7 +2946,7 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                if (c.IsFacedown()) continue;");
                 sb.AppendLine("                result.Add(c);");
                 sb.AppendLine("            }");
-                if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipFaceDown before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+                if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] skipFaceDown before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
                 sb.AppendLine("            return result;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
@@ -2788,7 +2965,26 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                if (!c.IsFaceup()) continue;");
                 sb.AppendLine("                result.Add(c);");
                 sb.AppendLine("            }");
-                if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] onlyFaceUp before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+                if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] onlyFaceUp before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+                sb.AppendLine("            return result;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
+            if (withEnemyOnly)
+            {
+                sb.AppendLine("        // B-77 (2026-11-02): 상대(컨트롤러 != 0) 카드만 — 네필 e2 처럼 '상대 몹만 소재로' 쓸 때");
+                sb.AppendLine("        private static IList<ClientCard> FilterEnemyOnly(IList<ClientCard> cards)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            IList<ClientCard> result = new List<ClientCard>();");
+                sb.AppendLine("            if (cards == null) return result;");
+                sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ClientCard c = cards[i];");
+                sb.AppendLine("                if (c == null) continue;");
+                sb.AppendLine("                if (c.Controller == 0) continue;   // 내 카드 제외");
+                sb.AppendLine("                result.Add(c);");
+                sb.AppendLine("            }");
+                if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] onlyEnemy before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
                 sb.AppendLine("            return result;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
@@ -2821,7 +3017,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("                }");
             sb.AppendLine("                result.Add(c);");
             sb.AppendLine("            }");
-            if (debugLog) sb.AppendLine("            LogLine(\"[AI-EDITOR] skipResistant before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
+            if (debugLog) sb.AppendLine("            if (result.Count != (cards == null ? 0 : cards.Count)) LogLine(\"[AI-EDITOR] skipResistant before=\" + (cards == null ? 0 : cards.Count).ToString() + \" after=\" + result.Count.ToString());");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -2845,6 +3041,15 @@ namespace WindBotAIEditor.Services
         /// `Card` 가 엉뚱한 카드가 되어 규칙이 통째로 빗나갔다.
         /// → 현재 체인(`Duel.CurrentChain`)에 그 카드가 있으면 매칭으로 본다.
         /// </summary>
+        /// <summary>
+        /// 2026-11-02: **체인(InChain) 판정 없이** 카드 자신(Card/ActivatingCard)만 본다.
+        /// routeNext 처럼 "그 카드의 프롬프트"에서만 동작해야 하는 규칙에 쓴다
+        /// (InChain 까지 보면 다른 카드의 선택 프롬프트를 가로챈다 — 22:22 판에서 마큐라의 세트 프롬프트를 와이반 규칙이 먹었다).
+        /// </summary>
+        private static string WhenCardExprNoChain(int whenCard)
+        {
+            return "((Card != null && " + IsCodeOr("Card", whenCard) + ") || (ActivatingCard() != null && " + IsCodeOr("ActivatingCard()", whenCard) + "))";
+        }
         private static string WhenCardExpr(int whenCard)
         {
             var sb = new StringBuilder();
@@ -3488,6 +3693,780 @@ namespace WindBotAIEditor.Services
             return list.OrderBy(o => o.Rank).ToList();
         }
 
+        /// <summary>
+        /// B-73: 루트 순서 강제 헬퍼 생성.
+        /// <c>RoutePending(card, type)</c> = 선택된 루트에서 그 (카드,행동)의 **첫 단계보다 커서가 앞**이면 true → ① 액션 금지.
+        /// 루트에 없는 카드 / 전개 종료(-1) / 미선택(-2) 은 막지 않는다.
+        /// </summary>
+        private static void EmitRoutePending(StringBuilder sb, List<RouteSet> firstSets, bool hasFirst,
+            List<RouteSet> secondSets, bool hasSecond, bool guard, List<ChoiceRule> routePickRules, bool useAlias, bool dbg, List<ActionRule> actions)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // ---- B-73: 루트 순서 강제 — ① 액션이 루트 단계를 앞지르지 못하게 한다 ----");
+            if (hasFirst) EmitRouteStepMap(sb, firstSets, "RouteStepFirst", "_routeSetFirst");
+            if (hasSecond) EmitRouteStepMap(sb, secondSets, "RouteStepSecond", "_routeSetSecond");
+            if (hasFirst) EmitRouteStepCards(sb, firstSets, "RouteStepCardFirst", "_routeSetFirst", "_routeSetSecond");
+            if (hasSecond) EmitRouteStepCards(sb, secondSets, "RouteStepCardSecond", "_routeSetSecond", "_routeSetFirst");
+            if (hasFirst || hasSecond) EmitRouteSkipHelpers(sb, dbg);   // 두 트랙이 함께 쓰므로 1회만
+            if (dbg) EmitRouteProbeHelper(sb);   // 2026-11-02: Main(idle 목록) 접근 가능 여부 진단
+            EmitRouteActionGate(sb, actions);   // 2026-11-02: 루트 단계가 ① 액션 조건을 우회하지 않게
+            if (routePickRules != null && routePickRules.Count > 0)
+                EmitRouteNextHelpers(sb, routePickRules, hasFirst, hasSecond, useAlias, dbg);
+
+            sb.AppendLine();
+            sb.AppendLine("        private int _routeLogFirst = -99;  // 루트 선택 로그 중복 방지(-99 = 아직 로그 없음 → 첫 값(-2 포함)도 기록)");
+            sb.AppendLine("        private int _routeLogSecond = -99;");
+            sb.AppendLine("        private int _routeProbeTurn = -1;  // 턴당 1회 Main 진단 로그");
+            sb.AppendLine("        private bool RoutePending(int card, int type)");
+            sb.AppendLine("        {");
+            if (dbg)
+            {
+                string probeArg = "0";
+                if (hasFirst && hasSecond) probeArg = "(Duel.IsFirst ? RouteStepCardFirst(_routeStep) : RouteStepCardSecond(_routeStepSecond))";
+                else if (hasFirst) probeArg = "RouteStepCardFirst(_routeStep)";
+                else if (hasSecond) probeArg = "RouteStepCardSecond(_routeStepSecond)";
+                sb.AppendLine("            if (Duel.Turn != _routeProbeTurn) { _routeProbeTurn = Duel.Turn; LogLine(\"[AI-EDITOR] route probe turn=\" + Duel.Turn.ToString() + \" cursor=\" + _routeStep.ToString() + \"/\" + _routeStepSecond.ToString() + RouteProbe(" + probeArg + ")); }");
+            }
+            if (hasFirst)
+            {
+                sb.AppendLine("            if (Duel.IsFirst)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (_routeSetFirst == -1) SelectRouteFirst();   // 지연 선택(멱등)");
+                if (dbg) sb.AppendLine("                if (_routeSetFirst != _routeLogFirst) { _routeLogFirst = _routeSetFirst; LogLine(\"[AI-EDITOR] route first sel=\" + _routeSetFirst.ToString()); }");
+                sb.AppendLine("                if (_routeSetFirst < 0) return false;           // -2: 전개 안 함");
+                sb.AppendLine("                _routeStep = RouteAdvance(_routeSetFirst, _routeStep, RouteStepPrimaryFirst, RouteStepOfferedFirst, RouteStepAnywhereFirst);   // 엔진이 제시하지 않은 단계 건너뛰기");
+                if (guard) sb.AppendLine("                RouteReselectIfStuck();   // ⑤ 남은 단계에 쓸 카드가 없으면 다른 루트로 재선택");
+                sb.AppendLine("                if (_routeStep < 0) return false;               // 이번 턴 전개 종료 → 자유");
+                sb.AppendLine("                int needF = RouteStepFirst(card, type);");
+                // 2026-11-02 (D): 게이트 창 — 커서 이후 **2단계까지만** 막는다.
+                //   카드가 손에 있어도 소환/발동 조건이 없으면(코스트·제물·대상 불가) 엔진이 그 액션을 제시하지 않아
+                //   커서가 멈추고 **그 턴 전체가 막히는** 사고가 있었다(20:41 리플레이: 와이반 코스트 불가).
+                //   먼 단계는 자유롭게 ① 액션으로 처리해 턴을 버리지 않는다.
+                sb.AppendLine("                if (needF < 0)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route off card=\" + card.ToString() + \" type=\" + type.ToString() + \" set=\" + _routeSetFirst.ToString() + \" step=\" + _routeStep.ToString() + RouteProbe(card));");
+                if (guard) sb.AppendLine("                    if (RouteHoldNonRoute()) { LogLine(\"[AI-EDITOR] route hold-off card=\" + card.ToString() + \" type=\" + type.ToString()); return true; }   // ⑤ 루트 우선: 진행 중 단계가 살아 있으면 루트 밖 행동은 뒤로");
+                sb.AppendLine("                    return false;   // 루트에 없는 (카드,행동) → 자유");
+                sb.AppendLine("                }");
+                sb.AppendLine("                if (needF < _routeStep)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route past card=\" + card.ToString() + \" type=\" + type.ToString() + \" need=\" + needF.ToString() + \" step=\" + _routeStep.ToString());");
+                sb.AppendLine("                    return false;   // 이미 지난 단계 → 자유");
+                sb.AppendLine("                }");
+                sb.AppendLine("                if (needF > _routeStep + 2)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route ahead card=\" + card.ToString() + \" type=\" + type.ToString() + \" need=\" + needF.ToString() + \" step=\" + _routeStep.ToString());");
+                sb.AppendLine("                    return false;   // 2단계보다 뒤 → 자유(정지 시 턴 손실 방지)");
+                sb.AppendLine("                }");
+                if (dbg) sb.AppendLine("                LogLine(\"[AI-EDITOR] route hold set=\" + _routeSetFirst.ToString() + \" step=\" + _routeStep.ToString() + \" card=\" + card.ToString() + \" type=\" + type.ToString() + RouteProbe(card));");
+                sb.AppendLine("                return true;");
+                sb.AppendLine("            }");
+            }
+            if (hasSecond)
+            {
+                if (hasFirst) sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (_routeSetSecond == -1) SelectRouteSecond();");
+                if (dbg) sb.AppendLine("                if (_routeSetSecond != _routeLogSecond) { _routeLogSecond = _routeSetSecond; LogLine(\"[AI-EDITOR] route second sel=\" + _routeSetSecond.ToString()); }");
+                sb.AppendLine("                if (_routeSetSecond < 0) return false;");
+                sb.AppendLine("                _routeStepSecond = RouteAdvance(_routeSetSecond, _routeStepSecond, RouteStepPrimarySecond, RouteStepOfferedSecond, RouteStepAnywhereSecond);");
+                if (guard) sb.AppendLine("                RouteReselectIfStuck();   // ⑤ 남은 단계에 쓸 카드가 없으면 다른 루트로 재선택");
+                sb.AppendLine("                if (_routeStepSecond < 0) return false;");
+                sb.AppendLine("                int needS = RouteStepSecond(card, type);");
+                sb.AppendLine("                if (needS < 0)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route off card=\" + card.ToString() + \" type=\" + type.ToString() + \" set=\" + _routeSetSecond.ToString() + \" step=\" + _routeStepSecond.ToString() + RouteProbe(card));");
+                if (guard) sb.AppendLine("                    if (RouteHoldNonRoute()) { LogLine(\"[AI-EDITOR] route hold-off card=\" + card.ToString() + \" type=\" + type.ToString()); return true; }   // ⑤ 루트 우선: 진행 중 단계가 살아 있으면 루트 밖 행동은 뒤로");
+                sb.AppendLine("                    return false;   // 루트에 없는 (카드,행동) → 자유");
+                sb.AppendLine("                }");
+                sb.AppendLine("                if (needS < _routeStepSecond)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route past card=\" + card.ToString() + \" type=\" + type.ToString() + \" need=\" + needS.ToString() + \" step=\" + _routeStepSecond.ToString());");
+                sb.AppendLine("                    return false;   // 이미 지난 단계 → 자유");
+                sb.AppendLine("                }");
+                sb.AppendLine("                if (needS > _routeStepSecond + 2)");
+                sb.AppendLine("                {");
+                if (dbg) sb.AppendLine("                    LogLine(\"[AI-EDITOR] route ahead card=\" + card.ToString() + \" type=\" + type.ToString() + \" need=\" + needS.ToString() + \" step=\" + _routeStepSecond.ToString());");
+                sb.AppendLine("                    return false;   // 2단계보다 뒤 → 자유");
+                sb.AppendLine("                }");
+                if (dbg) sb.AppendLine("                LogLine(\"[AI-EDITOR] route hold set=\" + _routeSetSecond.ToString() + \" step=\" + _routeStepSecond.ToString() + \" card=\" + card.ToString() + \" type=\" + type.ToString() + RouteProbe(card));");
+                sb.AppendLine("                return true;");
+                sb.AppendLine("            }");
+            }
+            else
+            {
+                sb.AppendLine("            return false;   // 후공 루트 없음 → 막지 않는다");
+            }
+            sb.AppendLine("        }");
+            if (guard) EmitRouteGuardHelpers(sb, hasFirst, hasSecond);
+        }
+
+        /// <summary>
+        /// 2026-11-02 (⑤ 루트 목표): ① 잔여 단계 카드 보호(FilterRouteProtected) ② 루트 우선 홀드(RouteHoldNonRoute)
+        /// ③ 막힌 루트 재선택(RouteReselectIfStuck). 옵션 RouteGuard ON 일 때만 배출된다.
+        /// </summary>
+        private static void EmitRouteGuardHelpers(StringBuilder sb, bool hasFirst, bool hasSecond)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // ---- 2026-11-02 (⑤): 루트 목표 보호 / 루트 우선 / 막힌 루트 재선택 ----");
+
+            // ── RouteProtected: 커서부터 2단계 안의 1순위 카드인가 ──
+            sb.AppendLine();
+            sb.AppendLine("        private bool RouteProtected(int code)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (code <= 0) return false;");
+            if (hasFirst)
+            {
+                sb.AppendLine("            if (Duel.IsFirst)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (_routeSetFirst < 0 || _routeStep < 0) return false;");
+                sb.AppendLine("                for (int i = _routeStep; i <= _routeStep + 2; i++)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    int c = RouteStepPrimaryFirst(i);");
+                sb.AppendLine("                    if (c == 0) break;");
+                sb.AppendLine("                    if (c == code) return true;");
+                sb.AppendLine("                }");
+                sb.AppendLine("                return false;");
+                sb.AppendLine("            }");
+                if (!hasSecond) { sb.AppendLine("            return false;"); }
+            }
+            if (hasSecond)
+            {
+                sb.AppendLine("            if (_routeSetSecond < 0 || _routeStepSecond < 0) return false;");
+                sb.AppendLine("            for (int i = _routeStepSecond; i <= _routeStepSecond + 2; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                int c = RouteStepPrimarySecond(i);");
+                sb.AppendLine("                if (c == 0) break;");
+                sb.AppendLine("                if (c == code) return true;");
+                sb.AppendLine("            }");
+                sb.AppendLine("            return false;");
+            }
+            else if (!hasFirst)
+            {
+                sb.AppendLine("            return false;");
+            }
+            sb.AppendLine("        }");
+
+            // ── FilterRouteProtected ──
+            sb.AppendLine();
+            sb.AppendLine("        private IList<ClientCard> FilterRouteProtected(IList<ClientCard> cards, int min)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (cards == null || cards.Count <= min) return cards;");
+            sb.AppendLine("            IList<ClientCard> kept = new List<ClientCard>();");
+            sb.AppendLine("            for (int i = 0; i < cards.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = cards[i];");
+            sb.AppendLine("                if (c == null || !RouteProtected(c.Id)) kept.Add(c);");
+            sb.AppendLine("            }");
+            sb.AppendLine("            if (kept.Count < min) return cards;   // 전부 보호 대상이면 원본");
+            sb.AppendLine("            return kept;");
+            sb.AppendLine("        }");
+
+            // ── RouteHoldNonRoute: 진행 중 단계가 살아 있으면 루트 밖 행동은 미룬다 ──
+            sb.AppendLine();
+            sb.AppendLine("        private bool RouteHoldNonRoute()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (Duel.Player != 0) return false;   // 2026-11-03: **상대 턴에는 막지 않는다**(세트 함정 발동/견제가 루트에 묶여 멈추던 사고)");
+            if (hasFirst)
+            {
+                sb.AppendLine("            if (Duel.IsFirst)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                if (_routeSetFirst < 0 || _routeStep < 0) return false;");
+                sb.AppendLine("                return RouteStepAnywhereFirst(_routeStep);   // 커서 단계의 카드가 지금 쓸 수 있음");
+                sb.AppendLine("            }");
+                if (!hasSecond) { sb.AppendLine("            return false;"); }
+            }
+            if (hasSecond)
+            {
+                sb.AppendLine("            if (_routeSetSecond < 0 || _routeStepSecond < 0) return false;");
+                sb.AppendLine("            return RouteStepAnywhereSecond(_routeStepSecond);");
+            }
+            else if (!hasFirst)
+            {
+                sb.AppendLine("            return false;");
+            }
+            sb.AppendLine("        }");
+
+            // ── RouteStuckRemaining / RouteReselectIfStuck ──
+            sb.AppendLine();
+            sb.AppendLine("        private bool RouteStuckRemaining()");
+            sb.AppendLine("        {");
+            if (hasFirst && hasSecond)
+            {
+                sb.AppendLine("            int set = Duel.IsFirst ? _routeSetFirst : _routeSetSecond;");
+                sb.AppendLine("            int cur = Duel.IsFirst ? _routeStep : _routeStepSecond;");
+            }
+            else if (hasFirst)
+            {
+                sb.AppendLine("            int set = _routeSetFirst;");
+                sb.AppendLine("            int cur = _routeStep;");
+            }
+            else
+            {
+                sb.AppendLine("            int set = _routeSetSecond;");
+                sb.AppendLine("            int cur = _routeStepSecond;");
+            }
+            sb.AppendLine("            bool anyStep = false;");
+            sb.AppendLine("            if (set < 0 || cur < 0) return false;");
+            sb.AppendLine("            for (int i = cur; i < cur + 30; i++)");
+            sb.AppendLine("            {");
+            if (hasFirst && hasSecond)
+            {
+                sb.AppendLine("                int p = Duel.IsFirst ? RouteStepPrimaryFirst(i) : RouteStepPrimarySecond(i);");
+                sb.AppendLine("                if (p == 0) break;   // 루트 끝");
+                sb.AppendLine("                bool a = Duel.IsFirst ? RouteStepAnywhereFirst(i) : RouteStepAnywhereSecond(i);");
+            }
+            else if (hasFirst)
+            {
+                sb.AppendLine("                int p = RouteStepPrimaryFirst(i);");
+                sb.AppendLine("                if (p == 0) break;");
+                sb.AppendLine("                bool a = RouteStepAnywhereFirst(i);");
+            }
+            else
+            {
+                sb.AppendLine("                int p = RouteStepPrimarySecond(i);");
+                sb.AppendLine("                if (p == 0) break;");
+                sb.AppendLine("                bool a = RouteStepAnywhereSecond(i);");
+            }
+            sb.AppendLine("                anyStep = true;");
+            sb.AppendLine("                if (a) return false;   // 지금 쓸 수 있는 단계가 있다");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return anyStep;   // 단계가 있었는데 전부 쓸 수 없으면 막힘");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private void RouteReselectIfStuck()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (_routeReselectTried) return;");
+            sb.AppendLine("            if (!RouteStuckRemaining()) return;");
+            sb.AppendLine("            _routeReselectTried = true;");
+            if (hasFirst)
+            {
+                if (hasSecond) sb.AppendLine("            if (Duel.IsFirst)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                int old = _routeSetFirst;");
+                sb.AppendLine("                _routeSkipFirst = old;");
+                sb.AppendLine("                _routeSetFirst = -1;");
+                sb.AppendLine("                SelectRouteFirst();");
+                sb.AppendLine("                _routeSkipFirst = -1;");
+                sb.AppendLine("                if (_routeSetFirst >= 0) { _routeStep = 0; LogLine(\"[AI-EDITOR] route reselect \" + old.ToString() + \" -> \" + _routeSetFirst.ToString()); }");
+                sb.AppendLine("                else { _routeStep = -1; LogLine(\"[AI-EDITOR] route reselect \" + old.ToString() + \" -> none\"); }");
+                sb.AppendLine("            }");
+            }
+            if (hasSecond)
+            {
+                if (hasFirst) sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                sb.AppendLine("                int old2 = _routeSetSecond;");
+                sb.AppendLine("                _routeSkipSecond = old2;");
+                sb.AppendLine("                _routeSetSecond = -1;");
+                sb.AppendLine("                SelectRouteSecond();");
+                sb.AppendLine("                _routeSkipSecond = -1;");
+                sb.AppendLine("                if (_routeSetSecond >= 0) { _routeStepSecond = 0; LogLine(\"[AI-EDITOR] route reselect \" + old2.ToString() + \" -> \" + _routeSetSecond.ToString()); }");
+                sb.AppendLine("                else { _routeStepSecond = -1; LogLine(\"[AI-EDITOR] route reselect \" + old2.ToString() + \" -> none\"); }");
+                sb.AppendLine("            }");
+            }
+            sb.AppendLine("        }");
+        }
+
+        /// <summary>
+        /// C (2026-11-02): 벌/단계 → 그 단계의 카드 ID. 커서가 가리키는 단계의 카드가 **손/필드/엑덱/묘지 어디에도 없으면**
+        /// 다음 단계로 건너뛰어 "커서 정지 → 이후 단계 전부 차단" 을 막는다.
+        /// </summary>
+        private static void EmitRouteStepCards(StringBuilder sb, List<RouteSet> sets, string name, string setField, string otherSetField)
+        {
+            // ── (1) 1순위 카드 표 — 서치 대상(need) 판정용. 대안과 무관하게 그 단계의 대표 카드 ──
+            string primaryName = name.Replace("RouteStepCard", "RouteStepPrimary");
+            sb.AppendLine();
+            sb.AppendLine("        private int " + primaryName + "(int step)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":");
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    int card = 0;
+                    foreach (var o in opts) { if (o.Card > 0) { card = o.Card; break; } }
+                    if (card > 0) sb.AppendLine("                    if (step == " + i + ") return " + card + ";");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return 0;   // 단계 없음/끝");
+            sb.AppendLine("        }");
+
+            // ── (2) 스마트 카드 표 — 2026-11-02: 순위(대안)를 반영해 "지금 쓸 수 있는/제시된" 카드를 고른다 ──
+            //      우선순위: 엔진 제시(1순위→2순위…) → 보유/사용가능(1순위→…) → 1순위
+            sb.AppendLine();
+            sb.AppendLine("        private int " + name + "(int step)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":");
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    var usable = new List<RouteOption>();
+                    foreach (var o in opts) if (o.Card > 0) usable.Add(o);
+                    if (usable.Count == 0) continue;
+                    sb.AppendLine("                    if (step == " + i + ")");
+                    sb.AppendLine("                    {");
+                    if (usable.Count > 1)
+                    {
+                        sb.AppendLine("                        if (Main != null)");
+                        sb.AppendLine("                        {");
+                        foreach (var o in usable)
+                        {
+                            int tid = RouteTypeId(o.Action);
+                            if (tid < 0) continue;
+                            sb.AppendLine("                            if (RouteOffered(" + o.Card + ", " + tid + ") == 1) return " + o.Card + ";");
+                        }
+                        sb.AppendLine("                        }");
+                    }
+                    foreach (var o in usable)
+                    {
+                        int tid = RouteTypeId(o.Action);
+                        if (tid < 0) continue;
+                        sb.AppendLine("                        if (RouteCardUsable(Bot, " + o.Card + ", " + tid + ")) return " + o.Card + ";");
+                    }
+                    sb.AppendLine("                        return " + usable[0].Card + ";   // 전부 불가 → 1순위(스킵 판정에서 걸러진다)");
+                    sb.AppendLine("                    }");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return 0;   // 단계 없음/끝");
+            sb.AppendLine("        }");
+
+            // ── (3) 단계 사용가능 표 — 대안 중 하나라도 '쓸 수 있으면' true (스킵 판정) ──
+            string usableName = name.Replace("RouteStepCard", "RouteStepAnywhere");
+            sb.AppendLine();
+            sb.AppendLine("        private bool " + usableName + "(int step)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":");
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    var parts = new List<string>();
+                    foreach (var o in opts)
+                    {
+                        int tid = RouteTypeId(o.Action);
+                        if (o.Card <= 0 || tid < 0) continue;
+                        parts.Add("RouteCardAvailable(Bot, " + o.Card + ")");
+                    }
+                    if (parts.Count > 0)
+                        sb.AppendLine("                    if (step == " + i + ") return " + string.Join(" || ", parts.ToArray()) + ";");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return false;   // 단계 없음/끝");
+            sb.AppendLine("        }");
+
+            // ── (4) 단계 '엔진 제시' 표 — 1=제시됨 / 0=아님 / -1=모름(Main 없음) ──
+            string offeredName = name.Replace("RouteStepCard", "RouteStepOffered");
+            sb.AppendLine();
+            sb.AppendLine("        private int " + offeredName + "(int step)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":");
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    var calls = new List<string>();
+                    foreach (var o in opts)
+                    {
+                        int tid = RouteTypeId(o.Action);
+                        if (o.Card <= 0 || tid < 0) continue;
+                        calls.Add("RouteOffered(" + o.Card + ", " + tid + ")");
+                    }
+                    if (calls.Count == 0) continue;
+                    sb.AppendLine("                    if (step == " + i + ")");
+                    sb.AppendLine("                    {");
+                    sb.AppendLine("                        int r = -1;");
+                    int xi = 0;
+                    foreach (var c in calls)
+                    {
+                        xi++;
+                        sb.AppendLine("                        int x" + xi + " = " + c + ";");
+                        sb.AppendLine("                        if (x" + xi + " == 1) return 1;");
+                        sb.AppendLine("                        if (x" + xi + " >= 0) r = 0;");
+                    }
+                    sb.AppendLine("                        return r;   // 전부 '아님'이면 0, 하나라도 모름이면 -1");
+                    sb.AppendLine("                    }");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return 0;   // 단계 없음/끝");
+            sb.AppendLine("        }");
+
+            // ── (5) 단계 → 행동 타입 (1순위 기준, 진단/호환용) ──
+            string typeName = name.Replace("RouteStepCard", "RouteStepType");
+            sb.AppendLine();
+            sb.AppendLine("        private int " + typeName + "(int step)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":");
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    int tid = -1;
+                    foreach (var o in opts) { if (o.Card > 0) { tid = RouteTypeId(o.Action); break; } }
+                    if (tid >= 0) sb.AppendLine("                    if (step == " + i + ") return " + tid + ";");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return -1;   // 단계 없음/끝");
+            sb.AppendLine("        }");
+        }
+
+        /// <summary>
+        /// 2026-11-02 (D-2): 루트 대기 진단용 — **엔진이 이번 idle 프롬프트에서 무엇을 제시했는지**를 로그로 남긴다.
+        /// `Executor.Main`(WindBot.Game.MainPhase) 이 실제로 채워지는지, 커서 단계의 카드가 제시되는지를 확인하기 위한 1단계.
+        /// (값이 나오면 다음 단계로 `Main` 기반 정확 판정으로 교체할 수 있다)
+        /// </summary>
+        private static void EmitRouteProbeHelper(StringBuilder sb)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // 진단: Main(idle 목록) 접근 여부 + 커서 카드가 제시됐는지. 이번 프롬프트 목록을 최대 12장까지 함께 남긴다.");
+            sb.AppendLine("        private string RouteProbe(int code)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            MainPhase m = Main;");
+            sb.AppendLine("            if (m == null) return \" main=null\";");
+            sb.AppendLine("            IList<ClientCard>[] lists = new IList<ClientCard>[] { m.ActivableCards, m.SpecialSummonableCards, m.SummonableCards, m.MonsterSetableCards, m.SpellSetableCards, m.ReposableCards };");
+            sb.AppendLine("            string[] names = new string[] { \"act\", \"sps\", \"sum\", \"mset\", \"sset\", \"repos\" };");
+            sb.AppendLine("            bool offered = false;");
+            sb.AppendLine("            string ids = \"\";");
+            sb.AppendLine("            int n = 0;");
+            sb.AppendLine("            for (int k = 0; k < lists.Length; k++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                IList<ClientCard> list = lists[k];");
+            sb.AppendLine("                if (list == null) continue;");
+            sb.AppendLine("                for (int i = 0; i < list.Count && n < 12; i++)");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    ClientCard c = list[i];");
+            sb.AppendLine("                    if (c == null) continue;");
+            sb.AppendLine("                    if (c.IsCode(code)) offered = true;");
+            sb.AppendLine("                    ids = ids + (n == 0 ? \"\" : \",\") + names[k] + \":\" + c.Id.ToString();");
+            sb.AppendLine("                    n++;");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return \" main=ok offer=\" + (offered ? \"yes\" : \"no\") + \" list=[\" + ids + \"]\";");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+        /// <summary>
+        /// 2026-11-02 (사용자 승인): 루트 단계 실행 전에 **같은 (카드, 행동)의 ① 액션 조건**을 확인한다.
+        /// 같은 카드·행동의 ① 규칙이 여러 개면 **OR** 로 본다(하나라도 만족하면 허용). ① 규칙이 없으면 항상 허용.
+        /// (예: Varudras/불사의 태양신의 lpDiff·turn 게이트가 루트 단계에서도 지켜진다)
+        /// </summary>
+        private static void EmitRouteActionGate(StringBuilder sb, List<ActionRule> actions)
+        {
+            var map = new Dictionary<string, List<string>>();
+            if (actions != null)
+            {
+                foreach (var a in actions)
+                {
+                    if (a == null || a.Card <= 0) continue;
+                    if (a.Conditions == null || a.Conditions.Count == 0) continue;
+                    int tid = RouteTypeId(a.Type);
+                    if (tid < 0) continue;
+                    string key = a.Card + "|" + tid;
+                    if (!map.ContainsKey(key)) map[key] = new List<string>();
+                    map[key].Add(ConditionExpression(a.Conditions));
+                }
+            }
+            sb.AppendLine();
+            sb.AppendLine("        // 루트 단계도 ① 액션 조건을 지킨다(같은 카드·행동의 ① 조건 OR). ① 규칙이 없으면 true");
+            sb.AppendLine("        private bool RouteActionAllowed(int card, int type)");
+            sb.AppendLine("        {");
+            foreach (var kv in map)
+            {
+                var parts = kv.Key.Split('|');
+                var exprs = kv.Value;
+                sb.AppendLine("            if (card == " + parts[0] + " && type == " + parts[1] + ")");
+                sb.AppendLine("                return (" + string.Join(") || (", exprs.ToArray()) + ");");
+            }
+            sb.AppendLine("            return true;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+        /// <summary>C (2026-11-02): 단계 건너뛰기 공용 헬퍼 — 두 트랙이 함께 쓰므로 **한 번만** 배출한다.</summary>
+        private static void EmitRouteSkipHelpers(StringBuilder sb, bool dbg)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // 카드가 손·필드(양쪽)·엑스트라·묘지 어디에도 없으면 그 단계는 이번 턴 불가 (서치 대상 판정용)");
+            sb.AppendLine("        private static bool RouteCardAvailable(ClientField me, int code)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (code <= 0) return true;");
+            sb.AppendLine("            if (me == null) return false;");
+            sb.AppendLine("            if (me.HasInHand(code)) return true;");
+            sb.AppendLine("            for (int i = 0; i < me.MonsterZone.Length; i++) { ClientCard c = me.MonsterZone[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            for (int i = 0; i < me.SpellZone.Length; i++) { ClientCard c = me.SpellZone[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            if (me.ExtraDeck != null) for (int i = 0; i < me.ExtraDeck.Count; i++) { ClientCard c = me.ExtraDeck[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            if (me.Graveyard != null) for (int i = 0; i < me.Graveyard.Count; i++) { ClientCard c = me.Graveyard[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        // 2026-11-02 (E): 행동 타입별 '지금 쓸 수 있는가' —");
+            sb.AppendLine("        //   Summon/MonsterSet/SpellSet 은 **패에 있어야** 한다(묘지/필드의 같은 카드를 보유로 오인하지 않는다).");
+            sb.AppendLine("        //   SpSummon 은 패·엑스트라·묘지(부활) 가능. Activate 는 패·필드(+ 묘지 발동 카드는 **이번 턴 미발동**일 때만).");
+            sb.AppendLine("        private bool RouteCardUsable(ClientField me, int code, int type)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (code <= 0) return true;");
+            sb.AppendLine("            if (me == null) return false;");
+            sb.AppendLine("            if (type == 0 || type == 3 || type == 4 || type == 6)   // 일반소환/세트/마함세트 → 패");
+            sb.AppendLine("                return me.HasInHand(code);");
+            sb.AppendLine("            if (type == 2)   // 표시형식 변경 → 필드");
+            sb.AppendLine("            {");
+            sb.AppendLine("                for (int i = 0; i < me.MonsterZone.Length; i++) { ClientCard c = me.MonsterZone[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("                return false;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            // SpSummon(1) · Activate(5) · 그 외 → 패/필드/엑덱");
+            sb.AppendLine("            if (me.HasInHand(code)) return true;");
+            sb.AppendLine("            for (int i = 0; i < me.MonsterZone.Length; i++) { ClientCard c = me.MonsterZone[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            for (int i = 0; i < me.SpellZone.Length; i++) { ClientCard c = me.SpellZone[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            if (me.ExtraDeck != null) for (int i = 0; i < me.ExtraDeck.Count; i++) { ClientCard c = me.ExtraDeck[i]; if (c != null && c.IsCode(code)) return true; }");
+            sb.AppendLine("            if (me.Graveyard != null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                for (int i = 0; i < me.Graveyard.Count; i++)");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    ClientCard c = me.Graveyard[i];");
+            sb.AppendLine("                    if (c == null || !c.IsCode(code)) continue;");
+            sb.AppendLine("                    if (type == 1) return true;                    // 묘지 부활/특소는 정상");
+            sb.AppendLine("                    if (type == 5 && !IsActivatedThisTurn(code)) return true;   // 묘지 발동 효과(도굴꾼 등)");
+            sb.AppendLine("                    return false;                                   // 이번 턴 이미 발동한 카드 → 불가");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private int RouteSkip(int set, int cur, System.Func<int, int> stepPrimary, System.Func<int, bool> stepAnywhere)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            int guard = 0;");
+            sb.AppendLine("            int start = cur;");
+            sb.AppendLine("            while (cur >= 0 && guard++ < 64)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (stepPrimary(cur) == 0) return cur;                     // 단계 없음/끝 → 그대로");
+            sb.AppendLine("                if (stepAnywhere(cur)) return cur;                          // 대안 중 하나라도 손/필드/엑덱/묘지에 있다(덱만 있으면 대기)");
+            sb.AppendLine("                cur++;                                                      // 전부 불가 → 다음 단계");
+            sb.AppendLine("            }");
+            if (dbg) sb.AppendLine("            if (cur != start) LogLine(\"[AI-EDITOR] route skip set=\" + set.ToString() + \" \" + start.ToString() + \"->\" + cur.ToString());");
+            sb.AppendLine("            return cur;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        // 2026-11-02 (F): 엔진이 이번 idle 프롬프트에 제시한 액션인가? 1=제시됨 / 0=아님 / -1=모름(Main 없음)");
+            sb.AppendLine("        private int RouteOffered(int code, int type)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            MainPhase m = Main;");
+            sb.AppendLine("            if (m == null) return -1;");
+            sb.AppendLine("            bool hit = RouteInList(m.ActivableCards, code, type == 5);");
+            sb.AppendLine("            if (!hit && (type == 0 || type == 6)) hit = RouteInList(m.SummonableCards, code, true);");
+            sb.AppendLine("            if (!hit && type == 1) hit = RouteInList(m.SpecialSummonableCards, code, true);");
+            sb.AppendLine("            if (!hit && (type == 3 || type == 6)) hit = RouteInList(m.MonsterSetableCards, code, true);");
+            sb.AppendLine("            if (!hit && type == 4) hit = RouteInList(m.SpellSetableCards, code, true);");
+            sb.AppendLine("            if (!hit && type == 2) hit = RouteInList(m.ReposableCards, code, true);");
+            sb.AppendLine("            return hit ? 1 : 0;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private static bool RouteInList(IList<ClientCard> list, int code, bool use)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (list == null) return false;");
+            sb.AppendLine("            for (int i = 0; i < list.Count; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ClientCard c = list[i];");
+            sb.AppendLine("                if (c != null && c.IsCode(code)) return true;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        // 제시되지 않은 단계는 이번 턴 불가 → 다음 단계로 (Main 을 못 읽으면 아무 것도 하지 않는다)");
+            sb.AppendLine("        private int RouteAdvance(int set, int cur, System.Func<int, int> stepPrimary, System.Func<int, int> stepOffered, System.Func<int, bool> stepAnywhere)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            int guard = 0;");
+            sb.AppendLine("            int start = cur;");
+            sb.AppendLine("            while (cur >= 0 && guard++ < 64)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (stepPrimary(cur) == 0) return cur;");
+            sb.AppendLine("                if (stepOffered(cur) != 0) return cur;              // 대안 중 하나라도 제시됨(또는 모름) → 그대로");
+sb.AppendLine("                if (!stepAnywhere(cur)) return cur;                // 아직 덱에만 있다(서치 전) → 커서를 지키고 기다린다");
+            sb.AppendLine("                cur++;");
+            sb.AppendLine("            }");
+            if (dbg) sb.AppendLine("            if (cur != start) LogLine(\"[AI-EDITOR] route adv set=\" + set.ToString() + \" \" + start.ToString() + \"->\" + cur.ToString());");
+            sb.AppendLine("            return cur;");
+            sb.AppendLine("        }");
+        }
+
+        /// <summary>
+        /// B-76 (2026-11-02): 선택 정책 "루트 다음 단계 카드" — 서치가 **루트가 곧 필요로 하는 카드**를 가져온다.
+        /// 커서 이후 단계를 순서대로 보며 (a) 아직 손/필드/엑덱/묘지에 없고 (b) 지금 후보 목록에 있는 첫 카드를 고른다.
+        /// 루트가 없거나(-2) 전개가 끝났으면(_routeStep &lt; 0) 또는 루트 자체가 없으면 빈 목록 → 다음 규칙(고정 사슬)로 폴백.
+        /// </summary>
+        private static void EmitRouteNextHelpers(StringBuilder sb, List<ChoiceRule> rules, bool hasFirst, bool hasSecond, bool useAlias, bool dbg)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // ---- B-76: 루트 다음 단계 카드 (서치 대상 = 루트가 필요로 하는 카드) ----");
+            if (hasFirst || hasSecond)
+            {
+                sb.AppendLine("        private List<int> RouteNeedCards()");
+                sb.AppendLine("        {");
+                sb.AppendLine("            List<int> need = new List<int>();");
+                if (hasFirst)
+                {
+                    sb.AppendLine("            if (Duel.IsFirst)");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                if (_routeSetFirst == -1) SelectRouteFirst();");
+                    sb.AppendLine("                if (_routeSetFirst < 0 || _routeStep < 0) return need;   // 루트 없음/전개 종료");
+                    sb.AppendLine("                for (int s = _routeStep; s < 512; s++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    int code = RouteStepPrimaryFirst(s);");
+                    sb.AppendLine("                    if (code == 0) break;");
+                    sb.AppendLine("                    if (RouteCardAvailable(Bot, code)) continue;   // 이미 보유 → 그 단계는 필요 없음");
+                    sb.AppendLine("                    need.Add(code);");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("            }");
+                }
+                if (hasSecond)
+                {
+                    sb.AppendLine(hasFirst ? "            else" : "            if (true)");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                if (_routeSetSecond == -1) SelectRouteSecond();");
+                if (dbg) sb.AppendLine("                if (_routeSetSecond != _routeLogSecond) { _routeLogSecond = _routeSetSecond; LogLine(\"[AI-EDITOR] route second sel=\" + _routeSetSecond.ToString()); }");
+                    sb.AppendLine("                if (_routeSetSecond < 0 || _routeStepSecond < 0) return need;");
+                    sb.AppendLine("                for (int s = _routeStepSecond; s < 512; s++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    int code = RouteStepPrimarySecond(s);");
+                    sb.AppendLine("                    if (code == 0) break;");
+                    sb.AppendLine("                    if (RouteCardAvailable(Bot, code)) continue;");
+                    sb.AppendLine("                    need.Add(code);");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("            }");
+                }
+                else if (hasFirst)
+                {
+                    // 후공 트랙이 없으면 선공 루트를 그대로 쓴다
+                    sb.AppendLine("            else");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                if (_routeSetFirst == -1) SelectRouteFirst();");
+                    sb.AppendLine("                if (_routeSetFirst < 0 || _routeStep < 0) return need;");
+                    sb.AppendLine("                for (int s = _routeStep; s < 512; s++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    int code = RouteStepPrimaryFirst(s);");
+                    sb.AppendLine("                    if (code == 0) break;");
+                    sb.AppendLine("                    if (RouteCardAvailable(Bot, code)) continue;");
+                    sb.AppendLine("                    need.Add(code);");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("            }");
+                }
+                sb.AppendLine("            return need;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
+
+            string aliasCall = useAlias ? "IsCodeAlias(c, need[i])" : "c.IsCode(need[i])";
+            for (int n = 1; n <= rules.Count; n++)
+            {
+                sb.AppendLine("        private IList<ClientCard> PickRouteNext_" + n + "(IList<ClientCard> cards, int max)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            List<ClientCard> picked = new List<ClientCard>();");
+                sb.AppendLine("            if (cards == null) return picked;");
+                if (hasFirst || hasSecond)
+                {
+                    sb.AppendLine("            List<int> need = RouteNeedCards();");
+                    sb.AppendLine("            for (int i = 0; i < need.Count && picked.Count < max; i++)");
+                    sb.AppendLine("            {");
+                    sb.AppendLine("                for (int j = 0; j < cards.Count && picked.Count < max; j++)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    ClientCard c = cards[j];");
+                    sb.AppendLine("                    if (c == null) continue;");
+                    sb.AppendLine("                    if (!" + aliasCall + ") continue;");
+                    sb.AppendLine("                    if (!picked.Contains(c)) picked.Add(c);");
+                    sb.AppendLine("                }");
+                    sb.AppendLine("            }");
+                }
+                else
+                {
+                    sb.AppendLine("            return picked;   // 루트가 없으면 다음 규칙(고정 사슬)로 폴백");
+                }
+                sb.AppendLine("            return picked;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+            }
+        }
+
+        /// <summary>B-73: 벌별 (카드,행동) → 첫 단계 표. 같은 조합이 여러 단계면 가장 이른 단계를 쓴다.</summary>
+        private static void EmitRouteStepMap(StringBuilder sb, List<RouteSet> sets, string name, string setField)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        private int " + name + "(int card, int type)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (" + setField + ")");
+            sb.AppendLine("            {");
+            for (int si = 0; si < sets.Count; si++)
+            {
+                var steps = RouteSteps(sets[si]);
+                if (steps.Count == 0) continue;
+                var map = new Dictionary<string, int>();
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var opts = OptionsOf(steps[i]);
+                    foreach (var o in opts)
+                    {
+                        if (o.Card <= 0) continue;
+                        int tid = RouteTypeId(o.Action);
+                        if (tid < 0) continue;
+                        foreach (var cid in AliasIds(o.Card))
+                        {
+                            var key = tid + "|" + cid;
+                            int cur;
+                            if (!map.TryGetValue(key, out cur) || i < cur) map[key] = i;
+                        }
+                    }
+                }
+                if (map.Count == 0) continue;
+                sb.AppendLine("                case " + si + ":   // " + OneLine(sets[si].Name));
+                foreach (var g in map.GroupBy(kv => kv.Value).OrderBy(x => x.Key))
+                {
+                    var parts = g.Select(kv =>
+                    {
+                        var p = kv.Key.Split('|');
+                        return "type == " + p[0] + " && card == " + p[1];
+                    });
+                    sb.AppendLine("                    if (" + string.Join(" || ", parts.ToArray()) + ") return " + g.Key + ";");
+                }
+                sb.AppendLine("                    break;");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            return -1;   // 루트에 없는 (카드,행동) → 막지 않는다");
+            sb.AppendLine("        }");
+        }
+
         /// <summary>전개 루트 실행기 등록 — 벌/단계마다 각 순위의 AddExecutor 한 줄.</summary>
         private static void EmitRouteRegistrations(StringBuilder sb, List<RouteSet> sets, bool second)
         {
@@ -3559,10 +4538,10 @@ namespace WindBotAIEditor.Services
                 bool hasCond = set.Conditions != null && set.Conditions.Count > 0;
                 sb.AppendLine("            // " + (i + 1) + "벌 " + OneLine(set.Name) + (hasCond ? " (조건 " + set.Conditions.Count + "개)" : " (조건 없음 → 항상 선택)"));
                 if (hasCond)
-                    sb.AppendLine("            if (" + ConditionExpression(set.Conditions) + ") { " + setState + " = " + i + "; return; }");
+                    sb.AppendLine("            if (" + (second ? "_routeSkipSecond" : "_routeSkipFirst") + " != " + i + " && (" + ConditionExpression(set.Conditions) + ")) { " + setState + " = " + i + "; return; }");
                 else
                 {
-                    sb.AppendLine("            " + setState + " = " + i + ";   // 조건 없음 → 항상 이 루트");
+                    sb.AppendLine("            if (" + (second ? "_routeSkipSecond" : "_routeSkipFirst") + " != " + i + ") { " + setState + " = " + i + "; return; }   // 조건 없음 → 항상 이 루트(재선택 제외는 건너뜀)");
                     sb.AppendLine("            return;");
                     sb.AppendLine("        }");
                     return;   // 뒤쪽 루트는 평가되지 않는다 (조건 없는 루트가 첫 번째로 확정)
@@ -3583,7 +4562,7 @@ namespace WindBotAIEditor.Services
         /// 순위 조건이 맞으면 그 단계를 확정(<c>_routeStep = N+1</c>)하고 true.
         /// 마지막 순위까지 불충족이면 <c>_routeStep = -1</c> → 그 턴의 이후 단계는 실행되지 않는다.
         /// </summary>
-        private static void EmitRouteMethods(StringBuilder sb, List<RouteSet> sets, bool second)
+        private static void EmitRouteMethods(StringBuilder sb, List<RouteSet> sets, bool second, bool hasEffectBlock)
         {
             var setState = RouteSetStateName(second);
             var state = RouteStateName(second);
@@ -3629,6 +4608,11 @@ namespace WindBotAIEditor.Services
                                 sb.AppendLine("            if (!(" + expr + ")) return false;   // 불충족 → 다음 순위로");
                             }
                         }
+                        int optTypeId = RouteTypeId(o.Action);
+                        if (optTypeId >= 0)
+                            sb.AppendLine("            if (!RouteActionAllowed(" + o.Card + ", " + optTypeId + ")) return false;   // ① 액션 조건도 만족(게이트 우회 방지)");
+                            if (hasEffectBlock)
+                                sb.AppendLine("            if (IsForbiddenEffect(Card, ActivateDescription)) return false;   // ③ 효과번호 금지도 루트에서 지킨다");
                         sb.AppendLine("            " + state + " = " + (i + 1) + ";   // 이 단계 확정");
                         sb.AppendLine("            return true;");
                         sb.AppendLine("        }");
@@ -3643,11 +4627,32 @@ namespace WindBotAIEditor.Services
         private static string LongLiteral(long v) =>
             (v >= int.MinValue && v <= int.MaxValue) ? v.ToString() : v + "L";
 
-        private static string ActionCall(ActionRule a, int card, bool stopWhenComplete, bool guardEffect)
+        /// <summary>B-73: ActionRule.Type 문자열 → ExecutorType 값 (Summon=0, SpSummon=1, Repos=2, MonsterSet=3, SpellSet=4, Activate=5, SummonOrSet=6)</summary>
+        private static int RouteTypeId(string action)
+        {
+            switch (action)
+            {
+                case "Summon": return 0;
+                case "SpSummon": return 1;
+                case "Repos": return 2;
+                case "MonsterSet": return 3;
+                case "SpellSet": return 4;
+                case "Activate": return 5;
+                case "SummonOrSet": return 6;
+                default: return -1;
+            }
+        }
+
+        private static string ActionCall(ActionRule a, int card, bool stopWhenComplete, bool guardEffect, bool routeGate)
         {
             bool hasCond = a.Conditions.Count > 0;
             bool needGuard = guardEffect && string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase);
             bool hasDesc = string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase) && a.EffectDesc >= 0;   // B-45
+            var attrExpr = AttributeDeclareExpr(a);
+            // B-73: 루트 순서 강제 — 카드가 지정된 ① 행동에만, 루트 단계 전이면 막는다
+            int routeType = RouteTypeId(a.Type);
+            bool needRouteGate = routeGate && routeType >= 0 && card > 0;
+            string routeGateExpr = needRouteGate ? "!RoutePending(" + card + ", " + routeType + ")" : "";
 
             // 2026-11-02: 포팅 스캐폴드 — 원본 handler 본문이 있으면 블록 람다로 감싸서 방출
             if (!string.IsNullOrWhiteSpace(a.RawBody))
@@ -3657,6 +4662,8 @@ namespace WindBotAIEditor.Services
                     gate = (gate.Length > 0 ? "(ActivateDescription == " + a.EffectDesc + ") && (" + gate + ")" : "ActivateDescription == " + a.EffectDesc);
                 if (needGuard)
                     gate = gate.Length > 0 ? "!IsForbiddenEffect(Card, ActivateDescription) && (" + gate + ")" : "!IsForbiddenEffect(Card, ActivateDescription)";
+                if (needRouteGate)
+                    gate = gate.Length > 0 ? "(" + gate + ") && " + routeGateExpr : routeGateExpr;
 
                 var sbRaw = new StringBuilder();
                 sbRaw.Append("AddExecutor(ExecutorType.").Append(a.Type);
@@ -3669,7 +4676,7 @@ namespace WindBotAIEditor.Services
                 return sbRaw.ToString();
             }
 
-            if (!hasCond && !stopWhenComplete && !needGuard && !hasDesc)
+            if (!hasCond && !stopWhenComplete && !needGuard && !hasDesc && attrExpr.Length == 0 && a.OptionIndex < 0 && !needRouteGate)
             {
                 return card > 0
                     ? $"AddExecutor(ExecutorType.{a.Type}, {card})"
@@ -3682,6 +4689,24 @@ namespace WindBotAIEditor.Services
             if (string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase) && a.EffectDesc >= 0)
                 expr = "(ActivateDescription == " + a.EffectDesc + ") && (" + expr + ")";
             if (needGuard) expr = "!IsForbiddenEffect(Card, ActivateDescription) && (" + expr + ")";
+            // B-73: 루트 순서 강제
+            if (needRouteGate) expr = expr == "true" ? routeGateExpr : "(" + expr + ") && " + routeGateExpr;
+
+            // 2026-11-02: 속성 선언(AI.SelectAttributes) — 문장 람다로 방출
+            if (attrExpr.Length > 0 || a.OptionIndex >= 0)
+            {
+                var sbAttr = new StringBuilder();
+                sbAttr.Append("AddExecutor(ExecutorType.").Append(a.Type);
+                if (card > 0) sbAttr.Append(", ").Append(card);
+                sbAttr.Append(", () =>\n{\n");
+                if (expr != "true") sbAttr.Append("    if (!(").Append(expr).Append(")) return false;\n");
+                if (a.OptionIndex >= 0)
+                    sbAttr.Append("    AI.SelectOption(").Append(a.OptionIndex).Append(");   // 옵션 인덱스 고정\n");
+                sbAttr.Append("    AI.SelectAttributes(new CardAttribute[] { ").Append(attrExpr).Append(" });   // 속성 선언\n");
+                sbAttr.Append("    return true;\n})");
+                return sbAttr.ToString();
+            }
+
             var func = "() => " + expr;
 
             return card > 0
@@ -3690,6 +4715,34 @@ namespace WindBotAIEditor.Services
         }
 
         /// <summary>B-14: 조건 부정(Not)을 식 전체에 적용</summary>
+        /// <summary>
+        /// 2026-11-02: `ActionRule.Attributes`("Dark,Wind" 등) → `CardAttribute.Dark, CardAttribute.Wind`.
+        /// 발동(Activate) 행이 아니거나 값이 비면 빈 문자열(코드 미생성).
+        /// </summary>
+        private static string AttributeDeclareExpr(ActionRule a)
+        {
+            if (a == null) return "";
+            if (!string.Equals(a.Type, "Activate", StringComparison.OrdinalIgnoreCase)) return "";
+            var raw = (a.Attributes ?? "").Trim();
+            if (raw.Length == 0) return "";
+            var parts = raw.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var list = new List<string>();
+            foreach (var p in parts)
+            {
+                switch (p.Trim().ToLowerInvariant())
+                {
+                    case "earth": case "땅": list.Add("CardAttribute.Earth"); break;
+                    case "water": case "물": list.Add("CardAttribute.Water"); break;
+                    case "fire": case "화염": list.Add("CardAttribute.Fire"); break;
+                    case "wind": case "바람": list.Add("CardAttribute.Wind"); break;
+                    case "light": case "빛": list.Add("CardAttribute.Light"); break;
+                    case "dark": case "어둠": list.Add("CardAttribute.Dark"); break;
+                    case "divine": case "신": list.Add("CardAttribute.Divine"); break;
+                }
+            }
+            return list.Count == 0 ? "" : string.Join(", ", list.ToArray());
+        }
+
         /// <summary>
         /// 2026-11-01: UI 미리보기용 — 조건 목록이 실제로 어떤 C# 식이 되는지 문자열로 돌려준다.
         /// 그룹(괄호)이 의도대로 묶였는지 화면에서 바로 확인할 때 쓴다.
@@ -3786,13 +4839,17 @@ namespace WindBotAIEditor.Services
                 case "enemySpellCount": return $"Enemy.GetSpellCount() {c.Op} {c.Value}";
                 case "enemyHandCount": return $"Enemy.GetHandCount() {c.Op} {c.Value}";
                 case "enemyAttackingCount": return $"CountAttacking(Enemy) {c.Op} {c.Value}";
+                case "fieldHasExtraMonster": return (c.Side == "enemy" ? "FieldHasExtraMonster(Enemy)" : "FieldHasExtraMonster(Bot)");   // 2026-11-02 (A)
                 case "enemyFaceUpCount": return $"CountFaceUp(Enemy) {c.Op} {c.Value}";
+                case "enemyFaceUpMonsterCount": return $"CountFaceUpMonster(Enemy) {c.Op} {c.Value}";   // B-77 (2026-11-02)
+                case "myFaceUpMonsterCount": return $"CountFaceUpMonster(Bot) {c.Op} {c.Value}";
             case "enemyUnusedEffectCount": return $"CountUnusedEffect(Enemy) {c.Op} {c.Value}";   // 2026-11-01
                 case "enemyFaceDownCount": return $"CountFaceDown(Enemy) {c.Op} {c.Value}";
                 case "enemyFaceUpSpellCount": return $"CountFaceUpSpell(Enemy) {c.Op} {c.Value}";   // 2026-11-01
                 case "myMonsterCount": return $"Bot.GetMonsterCount() {c.Op} {c.Value}";
                 case "myHandCount": return $"Bot.GetHandCount() {c.Op} {c.Value}";
                 case "myLp": return $"Bot.LifePoints {c.Op} {c.Value}";
+                case "lpDiff": return $"(Bot.LifePoints - Enemy.LifePoints) {c.Op} {c.Value}";   // 2026-11-02
                 case "enemyLp": return $"Enemy.LifePoints {c.Op} {c.Value}";
                 case "turn": return $"Duel.Turn {c.Op} {c.Value}";
                 case "enemyBestAttack": return $"BestAttack(Enemy) {c.Op} {c.Value}";
@@ -3803,6 +4860,7 @@ namespace WindBotAIEditor.Services
                 case "hasInHand": return c.Side == "me"
                     ? CallOr(x => "Bot.HasInHand(" + x + ")", c.Card)
                     : CallOr(x => "Enemy.HasInHand(" + x + ")", c.Card);
+                case "cardCount": return $"CountCard({SideExpr(c)}, {c.Card}) {c.Op} {c.Value}";   // 2026-11-02
                 case "hasInGraveyard": return c.Side == "me"
                     ? CallOr(x => "Bot.HasInGraveyard(" + x + ")", c.Card)
                     : CallOr(x => "Enemy.HasInGraveyard(" + x + ")", c.Card);
@@ -3815,6 +4873,7 @@ namespace WindBotAIEditor.Services
                 case "fieldHasRace": return $"FieldHasRace({SideExpr(c)}, {c.RaceId})";
                 case "fieldHasTunerLevel": return $"FieldHasTuner({SideExpr(c)}, {c.Value})";
                 case "fieldCardInEmz": return CallOr(x => "FieldHasCardInEmz(" + SideExpr(c) + ", " + x + ")", c.Card);
+                case "fieldCardInMonsterZone": return CallOr(x => "FieldHasCardInMonsterZone(" + SideExpr(c) + ", " + x + ")", c.Card);   // 2026-11-02
                 case "fieldLevelCount": return $"CountLevels({SideExpr(c)}, {c.Value}, true) {CountOp(c)} {Math.Max(1, c.Count)}";
                 // N-6: 펜듈럼
                 case "fieldHasPendulum": return $"PendulumCount({SideExpr(c)}) > 0";
@@ -3828,6 +4887,8 @@ namespace WindBotAIEditor.Services
                 case "phaseEnd": return "(Duel.Phase & DuelPhase.End) != 0";
                 case "chainLinkCount": return $"(Duel.CurrentChain != null && Duel.CurrentChain.Count {CountOp(c)} {c.Value})";
                 case "chainHasCard": return CallOr(x => "InChain(" + x + ")", c.Card);
+                // 2026-11-02: 이번 턴 내가 그 카드를 발동했는가 (OnChaining 기록 → 새 턴에 초기화)
+                case "myCardActivatedThisTurn": return CallOr(x => "IsActivatedThisTurn(" + x + ")", c.Card);
                 case "cardIsDisabled": return "(Card != null && Card.IsDisabled())";
                 // 2026-10-30: 대상 기준 무효 판정 — 체인 마지막(= 응답 대상) / 체인 전체
                 case "chainLastDisabled": return "ChainLastDisabled()";
@@ -3886,6 +4947,7 @@ namespace WindBotAIEditor.Services
         }
     }
 }
+
 
 
 

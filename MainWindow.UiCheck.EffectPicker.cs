@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -707,6 +707,474 @@ namespace WindBotAIEditor
             }
             return problems;
         }
-    }
-}
 
+        /// <summary>
+        /// 2026-11-02 (B-72): ⑤ 전개 루트 **목록에서 루트 삭제** — `− 루트` 버튼 / Delete 키 동작 검증.
+        /// <para>추가 → 삭제 → 개수 복원, 기본 루트 삭제 시 다른 루트가 기본으로 승격되는지 확인.</para>
+        /// </summary>
+        public List<string> VerifyRouteDeleteUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                CommitGrids();
+                var before = RouteSetCount(false);
+                var origDefaults = ActiveRouteSets.Where(r => r.IsDefault).ToList();
+                var added = new List<RouteSet>();
+
+                // 1) 2벌 추가
+                added.Add(AddRouteSet());
+                added.Add(AddRouteSet());
+                if (RouteSetCount(false) != before + 2)
+                    problems.Add("b72: 루트 추가 실패 (" + before + " → " + RouteSetCount(false) + ")");
+
+                // 2) 일반 루트 삭제
+                RemoveRouteSet(added[0]);
+                if (RouteSetCount(false) != before + 1)
+                    problems.Add("b72: 루트 삭제 실패 (" + RouteSetCount(false) + ")");
+                if (ActiveRouteSets.Contains(added[0]))
+                    problems.Add("b72: 삭제한 루트가 목록에 남아 있음");
+
+                // 3) **기본 루트**를 삭제해도 트랙에 기본이 1개 남는지 (추가분을 기본으로 만들어 안전하게 검사)
+                added[1].IsDefault = true;
+                RemoveRouteSet(added[1]);
+                if (RouteSetCount(false) != before)
+                    problems.Add("b72: 기본 루트 삭제 후 개수가 원복되지 않음 (" + RouteSetCount(false) + ")");
+                if (ActiveRouteSets.Count > 0 && !ActiveRouteSets.Any(r => r.IsDefault))
+                    problems.Add("b72: 기본 루트 삭제 후 다른 루트가 기본으로 승격되지 않음");
+
+                // 4) 원래 기본 표시 복원
+                foreach (var r in origDefaults) if (ActiveRouteSets.Contains(r)) r.IsDefault = true;
+                UpdateRouteTrackUi();
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b72 routeDelete ok add=+2 del=OK default=OK restore=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b72: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+
+        /// <summary>
+        /// B-73 (2026-11-02): ⑤ 루트 순서 강제 — 체크박스 기본값 + 생성 코드 on/off 검증.
+        /// 켜면 ① 액션에 <c>RoutePending</c> 게이트가 붙고, 끄면 <b>한 줄도</b> 붙지 않아야 한다.
+        /// </summary>
+        public List<string> VerifyRouteAuthoritativeUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                if (ChkRouteAuthoritative == null) { problems.Add("b73: ChkRouteAuthoritative 없음"); return problems; }
+                if (ChkRouteAuthoritative.IsChecked != true) problems.Add("b73: 기본값이 ON 이 아님");
+
+                var p = new AiProfile { Engine = "RouteGateProbe", RouteAuthoritative = true };
+                p.Actions.Add(new ActionRule { Card = 40235813, Type = "Activate", Priority = 10 });
+                var set = new RouteSet { Name = "probe", IsDefault = true };
+                var st = new RouteStep { Order = 0 };
+                st.Options.Add(new RouteOption { Rank = 1, Card = 40235813, Action = "Activate" });
+                set.Steps.Add(st);
+                p.Routes.Add(set);
+
+                var onSrc = RuleCodeGen.Generate(p);
+                p.RouteAuthoritative = false;
+                var offSrc = RuleCodeGen.Generate(p);
+
+                if (onSrc.IndexOf("private bool RoutePending(", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b73: RoutePending 헬퍼가 없습니다");
+                if (onSrc.IndexOf("!RoutePending(40235813, 5)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b73: ① 액션에 게이트가 없습니다");
+                if (onSrc.IndexOf("private int RouteStepFirst(", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b73: RouteStepFirst 표가 없습니다");
+                if (offSrc.IndexOf("RoutePending(", System.StringComparison.Ordinal) >= 0)
+                    problems.Add("b73: OFF 인데 게이트가 생성됨");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b73 routeGate ok helper=OK gate=OK off=0");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b73: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// 2026-11-02 (B-74): 생성 코드 읽기 전용 창 — ⑤ 탭 버튼 존재 + 창 생성 + 루트 선택 블록 검색.
+        /// </summary>
+        public List<string> VerifyGeneratedCodeUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                if (BtnShowRoutedCode == null) { problems.Add("b74: BtnShowRoutedCode 없음"); return problems; }
+                CommitGrids();
+                var src = RuleCodeGen.Generate(_profile);
+                if (src.IndexOf("private void SelectRouteFirst", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b74: 생성 코드에 SelectRouteFirst 가 없습니다");
+                var w = new GeneratedCodeWindow("uicheck", src, "private void SelectRouteFirst");
+                if (w.TxtCode == null || w.TxtCode.Text.Length < 100) problems.Add("b74: 뷰어 본문이 비었습니다");
+                else if (w.TxtCode.Text.IndexOf("SelectRouteFirst", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b74: 뷰어 본문에 루트 선택 블록이 없습니다");
+                w.Close();
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b74 codeViewer ok btn=OK routeBlock=OK body=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b74: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-76/B-77 (2026-11-02): 선택 정책 `routeNext`(루트 다음 단계 카드) + 필터 `OnlyEnemy` + 조건 `enemyFaceUpMonsterCount`.
+        /// 코드젠이 실제로 헬퍼/게이트를 배출하는지 확인한다(창 없이 생성 코드 문자열만 본다).
+        /// </summary>
+        public List<string> VerifyRouteSearchUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                // 1) 루트 + routeNext 규칙
+                var pr = new AiProfile { Engine = "UiCheckRouteNext" };
+                pr.Actions = new List<ActionRule>();
+                pr.Forbids = new List<ForbidRule>();
+                pr.Triggers = new List<FinishTrigger>();
+                pr.OppTriggers = new List<OppTrigger>();
+                pr.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                var rs = new RouteSet { Name = "uicheck", IsDefault = true };
+                rs.Steps = new System.Collections.ObjectModel.ObservableCollection<RouteStep>();
+                var st1 = new RouteStep();
+                st1.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                st1.Options.Add(new RouteOption { Rank = 1, Card = 4881365, Action = "Activate" });
+                var st2 = new RouteStep();
+                st2.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                st2.Options.Add(new RouteOption { Rank = 1, Card = 101403017, Action = "Activate" });
+                rs.Steps.Add(st1); rs.Steps.Add(st2);
+                pr.Routes.Add(rs);
+                var ch = new ChoiceRule { Priority = 0, On = "SelectCard", Pick = "routeNext", WhenCard = 40235813 };
+                var onlyEnemy = new ChoiceRule { Priority = 1, On = "SelectCard", Pick = "enemyHighestAttack", WhenCard = 34876719, WhenHint = 513, OnlyEnemy = true };
+                pr.Choices = new List<ChoiceRule>();
+                pr.Choices.Add(ch); pr.Choices.Add(onlyEnemy);
+                var src = RuleCodeGen.Generate(pr);
+                if (src.IndexOf("PickRouteNext_1(", System.StringComparison.Ordinal) < 0) problems.Add("b76: PickRouteNext_1 없음");
+                if (src.IndexOf("private List<int> RouteNeedCards()", System.StringComparison.Ordinal) < 0) problems.Add("b76: RouteNeedCards 없음");
+                if (src.IndexOf("if (RouteCardAvailable(Bot, code)) continue;", System.StringComparison.Ordinal) < 0) problems.Add("b76: 보유 카드 skip 없음");
+                if (src.IndexOf("FilterEnemyOnly(", System.StringComparison.Ordinal) < 0) problems.Add("b77: FilterEnemyOnly 없음");
+                if (src.IndexOf("private static IList<ClientCard> FilterEnemyOnly", System.StringComparison.Ordinal) < 0) problems.Add("b77: FilterEnemyOnly 정의 없음");
+                if (src.IndexOf("c.Controller == 0) continue;", System.StringComparison.Ordinal) < 0) problems.Add("b77: 내 카드 제외 없음");
+
+                // 2) 조건 enemyFaceUpMonsterCount
+                var pr2 = new AiProfile { Engine = "UiCheckFaceUpMonster" };
+                pr2.Actions = new List<ActionRule>();
+                pr2.Forbids = new List<ForbidRule>();
+                pr2.Triggers = new List<FinishTrigger>();
+                pr2.OppTriggers = new List<OppTrigger>();
+                pr2.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr2.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                var a2 = new ActionRule { Priority = 1, Type = "Activate", Card = 101403052 };
+                a2.Conditions = new List<Models.Condition>();
+                a2.Conditions.Add(new Models.Condition { Kind = "enemyFaceUpMonsterCount", Op = ">=", Value = 1, Side = "enemy" });
+                pr2.Actions.Add(a2);
+                pr2.Choices = new List<ChoiceRule>();
+                var src2 = RuleCodeGen.Generate(pr2);
+                if (src2.IndexOf("CountFaceUpMonster(Enemy) >= 1", System.StringComparison.Ordinal) < 0) problems.Add("b77: CountFaceUpMonster 조건 없음");
+                if (src2.IndexOf("if ((c.Type & 0x4000) != 0) continue;", System.StringComparison.Ordinal) < 0) problems.Add("b77: 토큰 제외 없음");
+
+                // 3) 루트가 없으면 routeNext 는 빈 결과여야 한다(고정 사슬 폴백)
+                var pr3 = new AiProfile { Engine = "UiCheckRouteNextNoRoute" };
+                pr3.Actions = new List<ActionRule>();
+                pr3.Forbids = new List<ForbidRule>();
+                pr3.Triggers = new List<FinishTrigger>();
+                pr3.OppTriggers = new List<OppTrigger>();
+                pr3.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr3.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr3.Choices = new List<ChoiceRule>();
+                pr3.Choices.Add(new ChoiceRule { Priority = 0, On = "SelectCard", Pick = "routeNext", WhenCard = 40235813 });
+                var src3 = RuleCodeGen.Generate(pr3);
+                if (src3.IndexOf("PickRouteNext_1(", System.StringComparison.Ordinal) < 0) problems.Add("b76: 루트 없음 스텁 없음");
+                if (src3.IndexOf("private List<int> RouteNeedCards()", System.StringComparison.Ordinal) >= 0) problems.Add("b76: 루트 없는데 RouteNeedCards 생성됨");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b76 routeNext ok need=OK skipAvailable=OK noRoute=stub | b77 enemyOnly ok filter=OK cond=OK token=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b76/b77: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-78 (2026-11-02): ⑤ 단계 조건 팝업 — BuildBody 가 순위별 카드·행동·조건(요약+생성식)을 만드는지,
+        /// 창이 그 본문을 표시하는지 확인한다(창은 표시하지 않고 생성/닫기만).
+        /// </summary>
+        public List<string> VerifyRouteStepPopupUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var set = new RouteSet { Name = "uicheck 루트", IsDefault = false };
+                set.Conditions = new List<Models.Condition>();
+                set.Conditions.Add(new Models.Condition { Kind = "hasInHandOrSet", Card = 101403052, Op = ">=", Value = 1 });
+                var step = new RouteStep { Note = "uicheck 메모" };
+                step.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                var o1 = new RouteOption { Rank = 1, Card = 101403017, Action = "Activate" };
+                o1.Conditions = new List<Models.Condition>();
+                o1.Conditions.Add(new Models.Condition { Kind = "chainHasCard", Card = 34876719, Op = ">=", Value = 1 });
+                o1.Conditions.Add(new Models.Condition { Kind = "enemyFaceUpMonsterCount", Op = ">=", Value = 1, Side = "enemy" });
+                var o2 = new RouteOption { Rank = 2, Card = 76630812, Action = "SpellSet" };
+                o2.Conditions = new List<Models.Condition>();
+                step.Options.Add(o1); step.Options.Add(o2);
+                set.Steps = new System.Collections.ObjectModel.ObservableCollection<RouteStep>();
+                set.Steps.Add(step);
+
+                string body = RouteStepWindow.BuildBody(set, step, 1);
+                if (body.IndexOf("진입 조건:", System.StringComparison.Ordinal) < 0) problems.Add("b78: 진입 조건 없음");
+                if (body.IndexOf("단계 1", System.StringComparison.Ordinal) < 0) problems.Add("b78: 단계 번호 없음");
+                if (body.IndexOf("101403017", System.StringComparison.Ordinal) < 0) problems.Add("b78: 1순위 카드 없음");
+                if (body.IndexOf("76630812", System.StringComparison.Ordinal) < 0) problems.Add("b78: 2순위 카드 없음");
+                if (body.IndexOf("1순위", System.StringComparison.Ordinal) < 0) problems.Add("b78: 순위 표기 없음");
+                if (body.IndexOf("생성식:", System.StringComparison.Ordinal) < 0) problems.Add("b78: 생성식 없음");
+                if (body.IndexOf("조건 없음 · 항상 실행", System.StringComparison.Ordinal) < 0) problems.Add("b78: 조건 없음 표기 실패");
+                if (body.IndexOf("상대 필드 앞면 몬스터 수", System.StringComparison.Ordinal) < 0) problems.Add("b78: 조건 라벨 없음");
+
+                // 편집기 창: 편집 대상 콤보(루트 진입 + 2순위) + 조건 그리드 연결 + 생성식 미리보기
+                var w = new RouteStepWindow(set, step, 1, "uicheck");
+                if (w.CmbCondTarget == null || w.CmbCondTarget.Items.Count != 3) problems.Add("b79: 편집 대상 콤보가 3개가 아닙니다");
+                if (w.GridConds == null) problems.Add("b79: 조건 그리드 없음");
+                else if (!object.ReferenceEquals(w.GridConds.ItemsSource, o1.Conditions)) problems.Add("b79: 1순위 조건에 연결되지 않았습니다");
+                if (w.TxtExpr == null || w.TxtExpr.Text.IndexOf("CountFaceUpMonster(Enemy)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b79: 생성식 미리보기가 1순위 조건을 반영하지 않습니다");
+                // 편집 대상 전환 → 루트 진입 조건 + 그 식
+                w.CmbCondTarget.SelectedIndex = 0;
+                if (!object.ReferenceEquals(w.GridConds.ItemsSource, set.Conditions)) problems.Add("b79: 진입 조건으로 전환되지 않았습니다");
+                if (w.TxtExpr.Text.IndexOf("HasInHandOrSet", System.StringComparison.Ordinal) < 0) problems.Add("b79: 진입 조건 미리보기 실패");
+                // 실제 편집이 원본 객체에 반영되는지 (그리드에 새 행 추가 = 같은 List 에 추가)
+                int before = set.Conditions.Count;
+                var added = new Models.Condition { Kind = "enemyMonsterCount", Op = ">=", Value = 2, Side = "enemy" };
+                set.Conditions.Add(added);
+                w.GridConds.Items.Refresh();
+                if (set.Conditions.Count != before + 1) problems.Add("b79: 조건 추가 반영 실패");
+                set.Conditions.Remove(added);
+                w.Close();
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b78 stepPopup ok entry=OK ranks=OK conds=OK expr=OK window=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b78: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-80 (2026-11-02): **조건 생성식 미리보기 바** — ①②③ 조건 그리드를 선택/편집하면 식이 갱신되는지,
+        /// 빈 조건이면 안내 문구가 나오는지, 복사 버튼이 있는지 확인한다(원상 복구까지).
+        /// </summary>
+        public List<string> VerifyCondPreviewUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                if (PnlCondPreview == null) problems.Add("b80: 미리보기 패널 없음");
+                if (TxtCondPreview == null) { problems.Add("b80: TxtCondPreview 없음"); return problems; }
+                if (BtnCopyCondExpr == null) problems.Add("b80: 복사 버튼 없음");
+
+                var g = GridConds;
+                var backup = g.ItemsSource;
+                var tmp = new List<Models.Condition>();
+                tmp.Add(new Models.Condition { Kind = "hasInHand", Card = 101403052, Op = ">=", Value = 1 });
+                tmp.Add(new Models.Condition { Kind = "enemyFaceUpMonsterCount", Op = ">=", Value = 1, Side = "enemy", Join = "or", Group = 1 });
+                g.ItemsSource = tmp;
+                OnCondGridPreview(g, System.EventArgs.Empty);
+                if (TxtCondPreview.Text.IndexOf("① 행동 조건", System.StringComparison.Ordinal) < 0) problems.Add("b80: ① 접두 없음");
+                if (TxtCondPreview.Text.IndexOf("HasInHand", System.StringComparison.Ordinal) < 0) problems.Add("b80: 조건식이 없습니다");
+                if (TxtCondPreview.Text.IndexOf("||", System.StringComparison.Ordinal) < 0) problems.Add("b80: OR 그룹이 반영되지 않았습니다");
+
+                g.ItemsSource = new List<Models.Condition>();
+                OnCondGridPreview(g, System.EventArgs.Empty);
+                if (TxtCondPreview.Text.IndexOf("조건이 없습니다", System.StringComparison.Ordinal) < 0) problems.Add("b80: 빈 조건 안내 없음");
+
+                g.ItemsSource = backup;
+                OnCondGridPreview(g, System.EventArgs.Empty);   // 원상 복구 + 실제 상태로 되돌림
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b80 condPreview ok panel=OK areas=OK expr=OK or=OK empty=OK copy=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b80: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-81 (2026-11-02): 루트 게이트 **창(2단계)** — 커서에서 먼 단계는 막지 않아 턴을 버리지 않는지 확인.
+        /// 20:41 리플레이(와이반 코스트 불가로 커서 정지 → 턴 전체 차단) 재발 방지 검사.
+        /// </summary>
+        public List<string> VerifyRouteWindowUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var pr = new AiProfile { Engine = "UiCheckRouteWindow", DebugEffectLog = true };   // 로그도 검사 대상
+                pr.Actions = new List<ActionRule>();
+                pr.Choices = new List<ChoiceRule>();
+                pr.Forbids = new List<ForbidRule>();
+                pr.Triggers = new List<FinishTrigger>();
+                pr.OppTriggers = new List<OppTrigger>();
+                pr.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                var rs = new RouteSet { Name = "uicheck" };
+                rs.Steps = new System.Collections.ObjectModel.ObservableCollection<RouteStep>();
+                for (int k = 0; k < 6; k++)
+                {
+                    var st = new RouteStep();
+                    st.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                    st.Options.Add(new RouteOption { Rank = 1, Card = 101403000 + k, Action = "Activate" });
+                    rs.Steps.Add(st);
+                }
+                pr.Routes.Add(rs);
+                var src = RuleCodeGen.Generate(pr);
+                if (src.IndexOf("if (needF > _routeStep + 2)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b81: 게이트 창(needF > _routeStep + 2)이 없습니다");
+                if (src.IndexOf("if (needF < _routeStep)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b81: 지난 단계 허용(needF < _routeStep)이 없습니다");
+                if (src.IndexOf("route hold set=", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b81: route hold 로그가 없습니다");
+                if (src.IndexOf("route skip set=", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b81: route skip 로그가 없습니다");
+                if (src.IndexOf("route first sel=", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b81: route sel 로그가 없습니다");
+
+                // 게이트 OFF(routeAuthoritative=false)면 이 코드가 0줄이어야 한다(회귀 방지)
+                pr.RouteAuthoritative = false;
+                var src2 = RuleCodeGen.Generate(pr);
+                if (src2.IndexOf("needF > _routeStep + 2", System.StringComparison.Ordinal) >= 0)
+                    problems.Add("b81: 게이트 OFF 인데 차단 코드가 생성되었습니다");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b81 routeWindow ok window=OK past=OK logs=OK off=0");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b81: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-82 (2026-11-02): 루트 대기 **진단 로그**(`Main` = idle 목록 접근 여부) 생성 여부.
+        /// `debugEffectLog` ON 일 때만 `RouteProbe` 가 들어가고, OFF 면 0줄이어야 한다.
+        /// </summary>
+        public List<string> VerifyRouteProbeUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var pr = new AiProfile { Engine = "UiCheckRouteProbe", DebugEffectLog = true };
+                pr.Actions = new List<ActionRule>();
+                pr.Choices = new List<ChoiceRule>();
+                pr.Forbids = new List<ForbidRule>();
+                pr.Triggers = new List<FinishTrigger>();
+                pr.OppTriggers = new List<OppTrigger>();
+                pr.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                var rs = new RouteSet { Name = "uicheck" };
+                rs.Steps = new System.Collections.ObjectModel.ObservableCollection<RouteStep>();
+                for (int k = 0; k < 4; k++)
+                {
+                    var st = new RouteStep();
+                    st.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                    st.Options.Add(new RouteOption { Rank = 1, Card = 101403000 + k, Action = "Activate" });
+                    rs.Steps.Add(st);
+                }
+                pr.Routes.Add(rs);
+                var src = RuleCodeGen.Generate(pr);
+                if (src.IndexOf("private string RouteProbe(int code)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b82: RouteProbe 헬퍼가 없습니다");
+                if (src.IndexOf("MainPhase m = Main;", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b82: Main 접근 코드가 없습니다");
+                if (src.IndexOf("RouteProbe(card)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b82: hold 로그에 probe 가 없습니다");
+
+                pr.DebugEffectLog = false;
+                var src2 = RuleCodeGen.Generate(pr);
+                if (src2.IndexOf("private string RouteProbe(int code)", System.StringComparison.Ordinal) >= 0 || src2.IndexOf("RouteProbe(card)", System.StringComparison.Ordinal) >= 0)
+                    problems.Add("b82: 로그 OFF 인데 probe 코드가 생성되었습니다");
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b82 routeProbe ok helper=OK main=OK hold=OK off=0");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b82: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }
+        /// <summary>
+        /// B-83 (2026-11-02): 루트 정확화 3종 —
+        ///  (i) `OnNewTurn` 에서 루트 확정  (ii) 타입별 사용가능(`RouteCardUsable`)  (iii) `Main` 기반 스킵(`RouteAdvance`).
+        /// </summary>
+        public List<string> VerifyRouteExactUi()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var pr = new AiProfile { Engine = "UiCheckRouteExact", DebugEffectLog = true };
+                pr.Actions = new List<ActionRule>();
+                pr.Choices = new List<ChoiceRule>();
+                pr.Forbids = new List<ForbidRule>();
+                pr.Triggers = new List<FinishTrigger>();
+                pr.OppTriggers = new List<OppTrigger>();
+                pr.Routes = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                pr.RoutesSecond = new System.Collections.ObjectModel.ObservableCollection<RouteSet>();
+                var rs = new RouteSet { Name = "uicheck" };
+                rs.Steps = new System.Collections.ObjectModel.ObservableCollection<RouteStep>();
+                var acts = new string[] { "Activate", "Summon", "SpSummon", "SpellSet", "MonsterSet" };
+                for (int k = 0; k < 5; k++)
+                {
+                    var st = new RouteStep();
+                    st.Options = new System.Collections.ObjectModel.ObservableCollection<RouteOption>();
+                    st.Options.Add(new RouteOption { Rank = 1, Card = 101403000 + k, Action = acts[k] });
+                    rs.Steps.Add(st);
+                }
+                pr.Routes.Add(rs);
+                var src = RuleCodeGen.Generate(pr);
+
+                if (src.IndexOf("private int RouteStepTypeFirst(int step)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: RouteStepType 표가 없습니다");
+                if (src.IndexOf("private bool RouteCardUsable(ClientField me, int code, int type)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: RouteCardUsable 이 없습니다");
+                if (src.IndexOf("if (type == 0 || type == 3 || type == 4 || type == 6)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: 패 전용 판정(소환/세트)이 없습니다");
+                if (src.IndexOf("if (type == 5 && !IsActivatedThisTurn(code)) return true;", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: 묘지 발동 예외 처리가 없습니다");
+                if (src.IndexOf("private int RouteAdvance(int set, int cur", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: RouteAdvance 가 없습니다");
+                if (src.IndexOf("private int RouteOffered(int code, int type)", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: RouteOffered 가 없습니다");
+                if (src.IndexOf("if (card != null && player == 0) MarkMyActivated(card);", System.StringComparison.Ordinal) < 0)
+                    problems.Add("b83: 내 발동 기록이 없습니다");
+                // (i) 턴 시작 루트 확정
+                int onNew = src.IndexOf("public override void OnNewTurn()", System.StringComparison.Ordinal);
+                if (onNew < 0) problems.Add("b83: OnNewTurn 이 없습니다");
+                else
+                {
+                    int seg = src.IndexOf("base.OnNewTurn();", onNew, System.StringComparison.Ordinal);
+                    string body = seg > onNew ? src.Substring(onNew, seg - onNew) : "";
+                    if (body.IndexOf("SelectRouteFirst();", System.StringComparison.Ordinal) < 0)
+                        problems.Add("b83: OnNewTurn 에서 루트를 확정하지 않습니다");
+                    if (body.IndexOf("_usedActivated.Clear();", System.StringComparison.Ordinal) < 0)
+                        problems.Add("b83: OnNewTurn 에서 발동 기록을 초기화하지 않습니다");
+                }
+
+                if (problems.Count == 0)
+                    System.Console.Error.WriteLine("b83 routeExact ok typeTable=OK usable=OK gy=OK advance=OK onNewTurn=OK");
+            }
+            catch (System.Exception ex)
+            {
+                problems.Add("b83: 예외 " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return problems;
+        }    }
+}

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Input;
 using WindBotAIEditor.Models;
@@ -98,6 +98,70 @@ namespace WindBotAIEditor
                 return true;   // 검증기 자체 오류로 빌드를 막지는 않는다
             }
         }
+        /// <summary>
+        /// 2026-11-02 (A): ⑤ 단계 **조건 편집 팝업**을 연다 — 조건 편집의 유일한 입구(하단 그리드 제거).
+        /// preselectRank > 0 이면 그 순위 조건을 바로 연다.
+        /// </summary>
+        private void OpenStepConditionsPopup(RouteStep step, int stepNo, int preselectRank)
+        {
+            var set = ListRouteSets.SelectedItem as RouteSet;
+            string hint = "루트: " + (set != null ? set.DisplayName : "-")
+                        + "  ·  단계 " + stepNo + "  ·  편집 대상(루트 진입 조건 / 순위)을 골라 그 자리에서 고치세요. 닫으면 바로 반영됩니다.";
+            var w = new RouteStepWindow(set, step, stepNo, hint, preselectRank) { Owner = this };
+            w.ShowDialog();
+            // 팝업에서 고친 값이 본 화면 배지/요약에 바로 보이게 (조건 객체를 직접 고치므로 재바인딩만)
+            RefreshGroupBadges(GridActions?.ItemsSource);
+            RefreshGroupBadges(GridConds?.ItemsSource);
+            RefreshGroupBadges(GridChoiceConds?.ItemsSource);
+            RefreshGroupBadges(GridForbidConds?.ItemsSource);
+            UpdateRuleSummary();
+            Status("⑤ 단계 " + stepNo + " 조건 편집을 닫았습니다 — 규칙에 반영됨(저장은 [규칙 저장])");
+        }
+        /// <summary>
+        /// 2026-11-02 (B-78): ⑤ 단계 조건 팝업 — 조건 그리드까지 스크롤하지 않고 그 단계의 조건을 본다.
+        /// 단계 카드의 제목 클릭 또는 [조건 보기] 버튼에서 호출된다.
+        /// </summary>
+        private void OnShowStepConditions(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitGrids();
+                var fe = sender as FrameworkElement;
+                var step = fe != null ? fe.DataContext as RouteStep : null;
+                if (step == null) return;
+                var set = ListRouteSets.SelectedItem as RouteSet;
+                int no = (set != null && set.Steps != null) ? set.Steps.IndexOf(step) + 1 : 0;
+                if (no <= 0) no = 1;
+                OpenStepConditionsPopup(step, no, 0);
+                // 팝업에서 고친 값이 본 화면 배지/요약/생성식에 바로 보이게
+                RefreshGroupBadges(GridActions?.ItemsSource);
+                RefreshGroupBadges(GridConds?.ItemsSource);
+                RefreshGroupBadges(GridChoiceConds?.ItemsSource);
+                RefreshGroupBadges(GridForbidConds?.ItemsSource);
+                UpdateRuleSummary();
+                Status("⑤ 단계 " + no + " 조건 편집을 닫았습니다 — 규칙에 반영됨(저장은 [규칙 저장])");
+            }
+            catch (Exception ex)
+            {
+                Status("단계 조건 보기 실패: " + ex.Message);
+            }
+        }
+        /// <summary>
+        /// 2026-11-02: 생성 코드 읽기 전용 뷰어 — ⑤ 루트 선택처럼 UI 에 드러나지 않는 코드를 확인한다.
+        /// </summary>
+        private void OnShowRoutedCode(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitGrids();
+                var src = RuleCodeGen.Generate(_profile);
+                var w = new GeneratedCodeWindow("⑤ 생성 코드 — 루트 선택/조건", src, "private void SelectRouteFirst") { Owner = this };
+                w.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                Status("생성 코드 보기 실패: " + ex.Message);
+            }
+        }
     }
 }
-

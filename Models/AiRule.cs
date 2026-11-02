@@ -35,6 +35,8 @@ namespace WindBotAIEditor.Models
 
         /// <summary>우선순위 (낮을수록 먼저 평가)</summary>
         public int Priority { get; set; } = 100;
+        /// <summary>2026-11-03: 루트 게이트를 무시하고 **다른 어떤 실행기보다 먼저** 등록한다(예: 어둠으로 서치).</summary>
+        public bool AlwaysFirst { get; set; }
 
         /// <summary>ExecutorType 이름 (Summon, SpSummon, Activate ...) — 저장값은 영문 그대로</summary>
         public string Type { get; set; } = "Activate";
@@ -69,6 +71,20 @@ namespace WindBotAIEditor.Models
 
         /// <summary>B-45: 효과번호(ActivateDescription) 필터 — -1 = 무관. Activate 행에서만 사용</summary>
         public long EffectDesc { get; set; } = -1;
+
+        /// <summary>
+        /// 2026-11-02: 발동 시 **선언할 속성**(쉼표 구분, 예 `"Dark,Wind"`).
+        /// `Activate` 행에서만 사용하며, 생성 코드가 `AI.SelectAttributes(new CardAttribute[]{...})` 로 큐잉한다.
+        /// (파워 오브 더 듀얼리스트처럼 "속성을 선언"하는 카드용 — 선언 속성의 몬스터 효과를 그 턴 발동하지 않으면
+        ///  엔드 페이즈에 내 카드가 전부 묻히므로, 이 덱에서 **실제로 발동 가능한 속성**만 적는다)
+        /// </summary>
+        public string Attributes { get; set; } = "";
+
+        /// <summary>
+        /// 2026-11-02: 발동 시 **옵션 인덱스**(0부터, -1 = 무관) — `AI.SelectOption(n)` 으로 큐잉.
+        /// `SelectEffect` 로 옵션을 고르는 카드(파워 오브 더 듀얼리스트 등)에서 **속성 개수와 옵션을 한 세트로 고정**할 때 쓴다.
+        /// </summary>
+        public int OptionIndex { get; set; } = -1;
 
         /// <summary>
         /// 2026-11-02: **포팅 원본 handler 본문**(C#). 값이 있으면 생성 코드가
@@ -528,6 +544,13 @@ namespace WindBotAIEditor.Models
         public bool SkipEffectUsed { get; set; }
 
         /// <summary>
+        /// B-77 (2026-11-02): **상대(컨트롤러 != 0) 카드만** 후보로 남긴다.
+        /// 네필 어사일럼 e2 처럼 "상대 몹을 소재로 붙이는" 프롬프트에서 **내 카드를 쓰지 않게** 할 때 쓴다.
+        /// 필터 후 후보가 min 미만이면 그 규칙을 건너뛰고 다음 규칙/기본 폴백으로 간다.
+        /// </summary>
+        public bool OnlyEnemy { get; set; }
+
+        /// <summary>
         /// B-25: 선택 힌트(<c>hint</c>)가 이 값일 때만 적용 (0 = 무관).
         /// 같은 카드가 같은 콜백을 여러 번 띄울 때 구분한다
         /// (예: 526 = 공개 확인 `HINTMSG_CONFIRM`, 504 = 묘지로 `HINTMSG_TOGRAVE`, 502 = 파괴).
@@ -896,6 +919,20 @@ namespace WindBotAIEditor.Models
 
         /// <summary>전개 루트 — 후공 N벌. 비어 있으면 선공 트랙을 그대로 사용한다.</summary>
         public ObservableCollection<RouteSet> RoutesSecond { get; set; } = new ObservableCollection<RouteSet>();
+
+        /// <summary>
+        /// B-73 (2026-11-02): 루트 순서 강제. 켜면 ① 행동이 **선택된 루트의 해당 단계 전에는** 나가지 못한다
+        /// (루트가 '권장 순서'가 아니라 실제 시퀀서가 된다). 루트가 없으면 아무 영향도 없다.
+        /// </summary>
+        public bool RouteAuthoritative { get; set; } = true;
+
+        /// <summary>
+        /// 2026-11-02 (⑤ 루트 목표 보호): 루트가 선택돼 있으면
+        /// ① 루트 **잔여 단계의 카드**를 릴리스·버리기·소재(융합/싱크로/엑시즈/링크/디태치)에서 제외하고,
+        /// ② 진행 중인 단계가 살아 있으면 **루트 밖 ① 행동을 뒤로 미루며**,
+        /// ③ 남은 단계에 쓸 수 있는 카드가 하나도 없으면 **다른 루트로 재선택**한다.
+        /// </summary>
+        public bool RouteGuard { get; set; } = true;
 
         /// <summary>
         /// 하위 호환 전용 — 예전 단일 루트(선공). 읽을 때 <see cref="Routes"/> 1벌로 이관하고 비운다.
@@ -1524,6 +1561,8 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "enemySpellCount",   Label = "상대 마법/함정 존 수", NeedsValue = true },
             new ConditionKind { Id = "enemyHandCount",    Label = "상대 패 수", NeedsValue = true },
             new ConditionKind { Id = "enemyAttackingCount",Label = "상대 공격 표시 몬스터 수", NeedsValue = true },
+            new ConditionKind { Id = "enemyFaceUpMonsterCount", Label = "상대 필드 앞면 몬스터 수(토큰 제외)", NeedsValue = true },   // B-77 (2026-11-02)
+            new ConditionKind { Id = "myFaceUpMonsterCount",    Label = "내 필드 앞면 몬스터 수(토큰 제외)", NeedsValue = true },
             new ConditionKind { Id = "enemyFaceUpCount",  Label = "상대 필드 앞면 카드 수", NeedsValue = true, NeedsSide = false },
             new ConditionKind { Id = "enemyFaceDownCount",Label = "상대 필드 뒷면 카드 수", NeedsValue = true, NeedsSide = false },
             // 2026-11-01: 앞면 마법/함정만 (지속·필드·장착) — 제거 대상 판단
@@ -1534,6 +1573,7 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "myHandCount",       Label = "내 패 수", NeedsValue = true },
             new ConditionKind { Id = "myLp",              Label = "내 LP", NeedsValue = true },
             new ConditionKind { Id = "enemyLp",           Label = "상대 LP", NeedsValue = true },
+            new ConditionKind { Id = "lpDiff",            Label = "LP 차이 (내 LP − 상대 LP)", NeedsValue = true },
             new ConditionKind { Id = "turn",              Label = "현재 턴 수", NeedsValue = true },
             new ConditionKind { Id = "enemyBestAttack",   Label = "상대 최고 공격력", NeedsValue = true },
             new ConditionKind { Id = "myBestAttack",      Label = "내 최고 공격력", NeedsValue = true },
@@ -1542,13 +1582,17 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "hasInHand",         Label = "패에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
               new ConditionKind { Id = "extraHas",          Label = "내 엑스트라 덱에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = false, FixedSide = "me" },   // 2026-10-29
             new ConditionKind { Id = "hasInGraveyard",    Label = "묘지에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+            new ConditionKind { Id = "cardCount",         Label = "특정 카드 수 (패+필드+묘지+제외)", NeedsValue = true, NeedsCard = true, NeedsSide = true },
             new ConditionKind { Id = "hasOnField",        Label = "필드에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasLevel", Label = "필드에 레벨 N 몬스터 있음", NeedsValue = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasRank",  Label = "필드에 랭크 N 몬스터 있음", NeedsValue = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasLink",  Label = "필드에 링크 N 몬스터 있음", NeedsValue = true, NeedsSide = true },
             new ConditionKind { Id = "fieldHasRace",  Label = "필드에 특정 종족 몬스터 있음", NeedsValue = false, NeedsSide = true },
             new ConditionKind { Id = "fieldHasTunerLevel", Label = "필드에 N레벨 튜너 몬스터 있음", NeedsValue = true, NeedsSide = true },
-            new ConditionKind { Id = "fieldCardInEmz", Label = "필드(엑몹존)에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide = true },
+            new ConditionKind { Id = "fieldHasExtraMonster", Label = "필드에 엑덱 몬스터(엑시즈·싱크로·융합·링크) 있음", NeedsValue = false, NeedsSide = true },   // 2026-11-02 (A)
+            new ConditionKind { Id = "fieldCardInEmz", Label = "필드(엑몹존)에 특정 카드", NeedsValue = false, NeedsCard = true, NeedsSide =true },
+            // 2026-11-02: 몬스터존(메인 5 + 엑몹 2)에 특정 카드 — hasOnField 는 마함존까지 세므로 구분이 필요하다
+            new ConditionKind { Id = "fieldCardInMonsterZone", Label = "필드(몬스터존)에 특정 카드", NeedsValue = false, NeedsCard = true, FixedSide = "me" },
             new ConditionKind { Id = "fieldLevelCount", Label = "필드에 레벨 N 몬스터 M장 이상", NeedsValue = true, NeedsSide = true },
             // B-21: 같은 카드가 테마 + 종족 + 엑시즈를 모두 만족해야 한다 (조건 3개로 쪼개면 다른 카드끼리도 통과)
             new ConditionKind { Id = "fieldHasThemeRaceXyz", Label = "필드에 테마·종족 엑시즈 몬스터 있음", NeedsValue = false, NeedsSide = true, NeedsTheme = true, NeedsRace = true },
@@ -1595,6 +1639,8 @@ namespace WindBotAIEditor.Models
             new ConditionKind { Id = "phaseEnd",       Label = "지금이 엔드 페이즈", NeedsValue = false },
             new ConditionKind { Id = "chainLinkCount", Label = "체인 링크 수", NeedsValue = true },
             new ConditionKind { Id = "chainHasCard",   Label = "현재 체인에 특정 카드 있음", NeedsValue = false, NeedsCard = true },
+            // 2026-11-02: 이번 턴 내가 그 카드를 발동했는가 (= OnChaining 기록). 같은 카드의 2번째 발동을 구분할 때 쓴다.
+            new ConditionKind { Id = "myCardActivatedThisTurn", Label = "이번 턴 내가 발동한 카드", NeedsValue = false, NeedsCard = true, FixedSide = "me" },
             new ConditionKind { Id = "cardIsDisabled", Label = "이 카드는 효과 무효 상태", NeedsValue = false },
             // 2026-10-30: 대상 기준 무효 판정 — cardIsDisabled 는 '발동하는 카드' 기준이라 대상 판정에 못 쓴다
             new ConditionKind { Id = "chainLastDisabled", Label = "체인 마지막 카드가 무효", NeedsValue = false },
@@ -1648,6 +1694,7 @@ namespace WindBotAIEditor.Models
             new PickPolicy { Id = "codeMatch",          Label = "특정 카드 우선" },
             new PickPolicy { Id = "themeMatch",         Label = "테마 카드 우선" },
             new PickPolicy { Id = "chainCard",          Label = "발동 중인 카드" },
+            new PickPolicy { Id = "routeNext",          Label = "루트 다음 단계 카드" },
             new PickPolicy { Id = "firstAvailable",     Label = "목록 순서대로" },
         };
         public override string ToString() => Label;

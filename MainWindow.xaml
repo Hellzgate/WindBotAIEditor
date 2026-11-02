@@ -1,4 +1,4 @@
-<Window x:Class="WindBotAIEditor.MainWindow"
+﻿<Window x:Class="WindBotAIEditor.MainWindow"
         Background="{DynamicResource WindowBg}"
         Foreground="{DynamicResource TextFg}"
         TextElement.Foreground="{DynamicResource TextFg}"
@@ -169,386 +169,11 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*" MinHeight="340"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="100" MinHeight="80"/>
                     </Grid.RowDefinitions>
 
                     <!-- 설정 카드 (2열) — 창이 좁거나 낮으면 세로 스크롤로 접근 -->
-                    <Grid Grid.Row="0" x:Name="PnlSettingsCard" Margin="0,0,0,8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <DockPanel Grid.Row="0" Margin="0,0,0,4">
-                            <Button x:Name="BtnToggleSettings" DockPanel.Dock="Right" Content="설정 펼치기"
-                                    Click="OnToggleSettingsPanel" Padding="10,3"
-                                    ToolTip="엔진/RPS/선후공/대사 · 체인 중복 기준 · 열 회피 카드를 펼칩니다 (기본은 접힘)"/>
-                            <TextBlock Text="엔진 · 동작 세부" FontWeight="Bold" VerticalAlignment="Center"/>
-                            <TextBlock Text="기본은 접힘 — 엔진/대사/체인 설정을 바꿀 때만 [설정 펼치기]"
-                                       Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                            <!-- 2026-11-02 (A-6): 설정 검색 — 입력하면 자동으로 펼쳐지고 매칭 행만 남는다 -->
-                            <TextBox x:Name="TxtSettingsSearch" Width="170" MinHeight="24" Margin="14,0,0,0" VerticalAlignment="Center"
-                                     Style="{DynamicResource ThemedTextBox}"
-                                     ToolTip="설정 항목 검색(이름·툴팁). 입력하면 설정 카드가 자동으로 펼쳐지고 해당 항목만 남습니다. Esc = 지우기"
-                                     TextChanged="OnSettingsSearchChanged" KeyDown="OnSettingsSearchKeyDown"/>
-                            <TextBlock x:Name="TxtSettingsSearchInfo" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
-                                       Foreground="{DynamicResource HintFg}"/>
-                        </DockPanel>
-
-                        <ScrollViewer Grid.Row="1" x:Name="PnlSettings" VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled" MaxHeight="220"
-                                      Visibility="Collapsed">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" MinWidth="360"/>
-                                    <ColumnDefinition Width="10"/>
-                                    <ColumnDefinition Width="*" MinWidth="360"/>
-                                </Grid.ColumnDefinitions>
-
-                                <!-- 왼쪽: 엔진 / 봇 -->
-                                <Border Grid.Column="0" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
-                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
-                                    <StackPanel>
-                                        <TextBlock Text="엔진 / 봇" FontWeight="Bold" Margin="0,0,0,6"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="110"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="110"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="엔진" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold"/>
-                                            <TextBox Grid.Column="1" x:Name="TxtEngineName" Text="MyDeck" TextChanged="OnEngineNameChanged"/>
-                                            <TextBlock Grid.Column="2" Text="설명" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <TextBox Grid.Column="3" x:Name="TxtEngineDesc" Text="커스텀 덱 AI"/>
-                                        </Grid>
-                                        <WrapPanel Margin="0,8,0,0">
-                                            <CheckBox x:Name="ChkFreePlay" Content="자유 플레이" IsChecked="True" VerticalAlignment="Center"
-                                                      ToolTip="규칙을 지정하지 않은 행동 유형은 기본 AI 동작을 자동 추가합니다"/>
-                                            <CheckBox x:Name="ChkDebugEffect" Content="효과번호 기록" Margin="14,0,0,0" VerticalAlignment="Center"
-                                                      ToolTip="발동 시 카드ID/효과번호(desc)를 WindBot 콘솔에 기록합니다"/>
-                                        </WrapPanel>
-
-                                        <!-- B-15: 자유 플레이에 마법/함정 세트(SpellSet) 추가 — 기본 OFF -->
-                                        <CheckBox x:Name="ChkFreePlaySetSpell" Margin="0,8,0,0" VerticalAlignment="Center"
-                                                  Checked="OnFreePlaySetSpellChanged" Unchecked="OnFreePlaySetSpellChanged"
-                                                  ToolTip="자유 플레이에 ExecutorType.SpellSet 을 추가합니다 — 함정·속공은 패에서 발동할 수 없어 세트만 가능하므로, 이 옵션이 없으면 패에서 썩습니다">
-                                            <TextBlock Text="자유 플레이 시 마법/함정도 세트" TextWrapping="Wrap"/>
-                                        </CheckBox>
-                                        <Grid x:Name="PnlFreePlaySetSpell" Margin="20,6,0,0" Visibility="Collapsed">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                            <Grid Grid.Row="0">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="150"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="*" MinWidth="120"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="종류" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <ComboBox Grid.Column="1" x:Name="CmbFreePlaySetKind" Style="{DynamicResource ThemedComboBox}"
-                                                          DisplayMemberPath="Label" SelectedValuePath="Id"
-                                                          ToolTip="세트할 카드 종류 — 전체(마법+함정) / 함정만 / 속공 마법만"/>
-                                                <TextBlock Grid.Column="2" Text="제외 카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                                <controls:CardNameBox Grid.Column="3" x:Name="CardFreePlaySetExclude"
-                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                      ToolTip="패트랩처럼 세트하면 안 되는 카드 — 고르고 [추가]"/>
-                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddFreePlaySetExclude"
-                                                        ToolTip="선택한 카드를 세트 제외 목록에 추가"/>
-                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearFreePlaySetExclude"
-                                                        ToolTip="세트 제외 목록을 비웁니다"/>
-                                            </Grid>
-                                            <TextBlock Grid.Row="1" x:Name="TxtFreePlaySetExclude" Text="(없음)" FontSize="11" Margin="0,4,0,0"
-                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                       ToolTip="세트하지 않을 카드 목록"/>
-                                        </Grid>
-                                        <!-- B-16: 자유 플레이에서 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음 — 기본 ON -->
-                                        <CheckBox x:Name="ChkFreePlayProtectExtra" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                                                  ToolTip="릴리스/제물 후보에서 융합·싱크로·엑시즈·링크 몬스터를 뺍니다 (소재 사용은 그대로 허용). 남은 후보가 min 미만이면 원래 목록을 씁니다 — 엔진 오류 방지">
-                                            <TextBlock Text="자유 플레이 시 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음" TextWrapping="Wrap"/>
-                                        </CheckBox>
-                                        <!-- B-46: B-18 제물 여력 가드 예외 카드 (무제물 일반소환 카드) -->
-                                        <Grid Margin="20,4,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="150"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="120"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="제물 가드 예외" VerticalAlignment="Center" Margin="0,0,6,0"
-                                                       ToolTip="제물이 부족해도 소환을 시도할 카드 (무제물 일반소환 효과가 있는 카드)"/>
-                                            <TextBlock Grid.Column="1" Text="(제물 없이 소환 가능한 카드)" VerticalAlignment="Center"
-                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="3" x:Name="CardTributeGuardExcept"
-                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                  ToolTip="예) 레이즈 문의 고풍 캐롤 100458017 — 제물 2장이 없어도 무제물 일반소환을 시도합니다"/>
-                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddTributeGuardExcept"
-                                                    ToolTip="선택한 카드를 제물 가드 예외 목록에 추가"/>
-                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearTributeGuardExcept"
-                                                    ToolTip="예외 목록을 비웁니다"/>
-                                        </Grid>
-                                        <TextBlock Margin="20,2,0,0" x:Name="TxtTributeGuardExcept" Text="(없음)" FontSize="11"
-                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                   ToolTip="제물 여력 가드를 통과할 카드 목록 (B-18/B-46)"/>
-                                        <Grid Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="120"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="파괴 내성 카드" VerticalAlignment="Center" Margin="0,0,6,0"
-                                                       ToolTip="카드 효과로 파괴되지 않는 카드 — '상대 파괴 가능 몬스터 수' 계산에서 제외합니다 (예: 태양신의 수호자-갓 슬라임 101403073)"/>
-                                            <TextBlock Grid.Column="1" Text="(효과로 파괴 불가인 카드)" VerticalAlignment="Center"
-                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="3" x:Name="CardDestructibleImmune"
-                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                  ToolTip="예) 태양신의 수호자-갓 슬라임 101403073 — EFFECT_INDESTRUCTABLE_EFFECT"/>
-                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestructibleImmune"
-                                                    ToolTip="선택한 카드를 파괴 내성 목록에 추가"/>
-                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestructibleImmune"
-                                                    ToolTip="파괴 내성 목록을 비웁니다"/>
-                                        </Grid>
-                                        <TextBlock Margin="20,2,0,0" x:Name="TxtDestructibleImmune" Text="(없음)" FontSize="11"
-                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                   ToolTip="파괴 가능 몬스터 수 계산에서 제외할 카드 목록"/>
-                                        <DockPanel Margin="20,6,0,0">
-                                            <Button x:Name="BtnDestructCandAdd" DockPanel.Dock="Left" Content="후보 추가" Margin="0,0,6,0"
-                                                    Click="OnAddDestructCandidates"
-                                                    ToolTip="실전에서 '파괴를 시도했는데 안 죽은' 카드를 위 목록에 넣습니다. 넣은 뒤 [규칙 저장] → [생성 + 컴파일] → WindBot 재시작 (2026-11-01)"/>
-                                            <Button x:Name="BtnDestructCandIgnore" DockPanel.Dock="Left" Content="무시" Margin="0,0,8,0"
-                                                    Click="OnIgnoreDestructCandidates"
-                                                    ToolTip="지금 보이는 후보를 다시 보지 않습니다 (파괴 무효로 실패한 오탐 정리용)"/>
-                                            <TextBlock x:Name="TxtDestructCand" Text="(관찰된 후보 없음)" FontSize="11" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                       ToolTip="duel-log 의 destruct-fail 기록에서 모은 후보입니다 — 자동 등록은 하지 않습니다"/>
-                                        </DockPanel>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="120"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="효과 면역 카드" VerticalAlignment="Center" Margin="0,0,6,0"
-                                                       ToolTip="'다른 카드의 효과를 받지 않는' 카드 — 대상 선택에서 제외합니다(릴리스는 예외). 예: 17242023 붉은 눈의 초월흑룡 (Unaffected by your opponent's activated monster and Spell effects)"/>
-                                            <TextBlock Grid.Column="1" Text="(효과를 받지 않는 카드)" VerticalAlignment="Center"
-                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="3" x:Name="CardEffectImmune"
-                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                  ToolTip="예) 17242023 붉은 눈의 초월흑룡 — Unaffected by your opponent's activated monster and Spell effects"/>
-                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddEffectImmune"
-                                                    ToolTip="선택한 카드를 효과 면역 목록에 추가"/>
-                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearEffectImmune"
-                                                    ToolTip="효과 면역 목록을 비웁니다"/>
-                                        </Grid>
-                                        <TextBlock Margin="20,2,0,0" x:Name="TxtEffectImmune" Text="(없음)" FontSize="11"
-                                                   Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                   ToolTip="대상 선택에서 제외할 '효과를 받지 않는' 카드 목록 (2026-11-02)"/>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="120"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="무효화 카드" VerticalAlignment="Center" Margin="0,0,6,0"
-                                                       ToolTip="뵐러·무한포영처럼 '효과를 무효화'하는 카드 — 위 효과 면역 카드의 효과에 **체인하지 않습니다**(발동 자체 차단). 목록에 없는 카드(노모어벳 등)는 막지 않습니다"/>
-                                            <TextBlock Grid.Column="1" Text="(위 면역 카드에 체인 금지)" VerticalAlignment="Center"
-                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="3" x:Name="CardNegate"
-                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                  ToolTip="예) 97268402 Effect Veiler / 10045474 무한포영"/>
-                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddNegate"
-                                                    ToolTip="선택한 카드를 무효화 카드 목록에 추가"/>
-                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearNegate"
-                                                    ToolTip="무효화 카드 목록을 비웁니다"/>
-                                        </Grid>
-                                        <DockPanel Margin="20,2,0,0">
-                                            <Button x:Name="BtnNegateDefault" DockPanel.Dock="Left" Content="기본값(뵐러·포영)" Margin="0,0,8,0"
-                                                    Click="OnNegateDefaults"
-                                                    ToolTip="뵐러(97268402)와 무한포영(10045474)을 목록에 넣습니다"/>
-                                            <TextBlock x:Name="TxtNegate" Text="(없음)" FontSize="11" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                       ToolTip="발동을 막을 무효화 카드 목록 (2026-11-02)"/>
-                                        </DockPanel>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="120"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="파괴 카드" VerticalAlignment="Center" Margin="0,0,6,0"
-                                                       ToolTip="유령토끼처럼 '그 카드를 파괴한다' 계열 — 위 [파괴 내성 카드] 의 효과에 **체인하지 않습니다**(발동 자체 차단)"/>
-                                            <TextBlock Grid.Column="1" Text="(파괴 내성 카드에 체인 금지)" VerticalAlignment="Center"
-                                                       FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="3" x:Name="CardDestroy"
-                                                                  AllowEmpty="True" EmptyLabel="(카드 검색)"
-                                                                  ToolTip="예) 59438930/59438931 유령토끼 (Ghost Ogre &amp; Snow Rabbit)"/>
-                                            <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestroyCard"
-                                                    ToolTip="선택한 카드를 파괴 카드 목록에 추가"/>
-                                            <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestroyCard"
-                                                    ToolTip="파괴 카드 목록을 비웁니다"/>
-                                        </Grid>
-                                        <DockPanel Margin="20,2,0,0">
-                                            <Button x:Name="BtnDestroyDefault" DockPanel.Dock="Left" Content="기본값(유령토끼)" Margin="0,0,8,0"
-                                                    Click="OnDestroyDefaults"
-                                                    ToolTip="유령토끼(59438930, 59438931)을 목록에 넣습니다"/>
-                                            <TextBlock x:Name="TxtDestroy" Text="(없음)" FontSize="11" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
-                                                       ToolTip="발동을 막을 파괴 카드 목록 (2026-11-02)"/>
-                                        </DockPanel>
-                                        <Grid Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="140"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="140"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="가위바위보" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <ComboBox Grid.Column="1" x:Name="CmbRps" Style="{DynamicResource ThemedComboBox}"
-                                                      DisplayMemberPath="Label" SelectedValuePath="Id"/>
-                                            <TextBlock Grid.Column="2" Text="이겼을 때" VerticalAlignment="Center" Margin="12,0,6,0"/>
-                                            <ComboBox Grid.Column="3" x:Name="CmbTurnChoice" Style="{DynamicResource ThemedComboBox}"
-                                                      DisplayMemberPath="Label" SelectedValuePath="Id"/>
-                                            <TextBlock Grid.Column="4" Text="선공/후공은 [생성 + 컴파일] 후 적용"
-                                                       Foreground="{DynamicResource HintFg}" FontSize="11"
-                                                       VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
-                                        </Grid>
-                                        <Grid Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="150"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="대사" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <ComboBox Grid.Column="1" x:Name="CmbDialog" Style="{DynamicResource ThemedComboBox}"
-                                                      DisplayMemberPath="Label" SelectedValuePath="Id"/>
-                                            <Button Grid.Column="2" Content="대사 편집" Margin="8,0,0,0" Click="OnEditEngineDialog"/>
-                                        </Grid>
-                                        <TextBlock Text="대사는 이 엔진 전용입니다 (EDOPro 가 실행하는 봇에도 적용 · 재컴파일 필요)"
-                                                   Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- 오른쪽: 동작 세부 -->
-                                <Border Grid.Column="2" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
-                                        BorderThickness="1" CornerRadius="4" Padding="10,8">
-                                    <StackPanel>
-                                        <TextBlock Text="동작 세부" FontWeight="Bold" Margin="0,0,0,6"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="150"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="체인 중복 기준" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <ComboBox Grid.Column="1" x:Name="CmbChainBasis" Style="{DynamicResource ThemedComboBox}"
-                                                      DisplayMemberPath="Label" SelectedValuePath="Id"
-                                                      ToolTip="'체인당 N회 제한' 이 같은 카드/이름/테마를 몇 번까지 허용할지 판정하는 기준"/>
-                                            <TextBlock Grid.Column="2" Text="'체인당 N회 제한' 판정 기준"
-                                                       Foreground="{DynamicResource HintFg}" FontSize="11"
-                                                       VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
-                                        </Grid>
-                                        <Grid Margin="0,8,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*" MinWidth="150"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="열 회피 카드" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <controls:CardNameBox Grid.Column="1" x:Name="CardAvoidColumn"
-                                                                  AllowEmpty="True" EmptyLabel="(없음)"/>
-                                            <TextBlock Grid.Column="2" Text="그 카드가 놓인 세로열에 마법/함정을 두지 않음"
-                                                       Foreground="{DynamicResource HintFg}" FontSize="11"
-                                                       VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
-                                        </Grid>
-                                        <CheckBox x:Name="ChkSameNameAliases" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                                                  ToolTip="cdb 의 카드 이름이 같으면 같은 카드로 취급합니다. 예) 59438930 ↔ 59438931 (유령토끼 · 다른 일러) — 금지/행동/선택/조건/열 회피 규칙이 그룹 전체에 적용됩니다">
-                                            <TextBlock Text="같은 이름 카드(대체 일러·재록)도 같은 카드로 취급" TextWrapping="Wrap"/>
-                                        </CheckBox>
-                <CheckBox x:Name="ChkShowPreErrata" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="에라타 전 카드(이름에 (Pre-Errata))를 카드 검색에 표시합니다. EDOPro 에서 별도 카드/스크립트라 쓰지 않으면 숨기는 게 안전합니다"
-                          Checked="OnShowPreErrataChanged" Unchecked="OnShowPreErrataChanged">
-                    <TextBlock Text="에라타 전 카드도 검색에 표시 (기본: 숨김)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <TextBlock Text="기본 표시형식" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <ComboBox x:Name="CmbDefaultPosition" Width="140" Style="{DynamicResource ThemedComboBox}"
-                              ItemsSource="{Binding Source={x:Static local:MainWindow.Positions}}"
-                              SelectedValuePath="Id" DisplayMemberPath="Label"
-                              SelectionChanged="OnDefaultPositionChanged"
-                              ToolTip="① 행동 / ② 선택에서 표시형식을 지정하지 않은 카드를 소환할 때의 기본값 (기본: 공격 표시). 세트는 항상 뒷면 수비"/>
-                </StackPanel>
-                <CheckBox x:Name="ChkLinkPlace" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="N-5: 소환할 존을 고를 때 상대 링크 몬스터가 링크 중인 존을 피하고, 내 링크 존을 선호합니다 (기본: 꺼짐 / 링크 덱이 아니면 효과 없음)"
-                          Checked="OnLinkPlaceChanged" Unchecked="OnLinkPlaceChanged">
-                    <TextBlock Text="링크 마커 기반 존 선택 (기본: 꺼짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkAttackOnlyWinnable" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="모든 상대를 비교해 이길 수 있는(내 공격력 &gt; 상대 공격력/수비력) 대상이 하나도 없으면 배틀 페이즈를 종료합니다. 이길 수 있으면 가장 위협적인 상대를 가장 약한 내 몬스터로 공격합니다"
-                          Checked="OnAttackOnlyWinnableChanged" Unchecked="OnAttackOnlyWinnableChanged">
-                    <TextBlock Text="이길 수 없으면 공격하지 않음 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkSkipResistantGlobal" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="② 선택 규칙의 기본값 — 대상 선택 전에 내성 몹(대상/효과 보호: IsMonsterInvincible / IsShouldNotBeTarget / IsShouldNotBeMonsterTarget / IsShouldNotBeSpellTrapTarget)을 후보에서 제외합니다. 규칙별 [내성 제외] 를 [제외 안 함] 으로 두면 그 규칙만 무시합니다 (2026-11-01)"
-                          Checked="OnSkipResistantGlobalChanged" Unchecked="OnSkipResistantGlobalChanged">
-                    <TextBlock Text="내성 몹 대상 제외 — 전체 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkSkipDestructImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="파괴 선택(hint=Destroy)일 때 '파괴되지 않는 카드'를 후보에서 제외합니다. WindBot 내장 파괴불가 목록 + [파괴 내성 카드] 목록을 봅니다. 전부 파괴 불가면 원래 목록을 씁니다 (2026-11-01)"
-                          Checked="OnSkipDestructImmuneChanged" Unchecked="OnSkipDestructImmuneChanged">
-                    <TextBlock Text="파괴 선택에서 파괴 내성 카드 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkSkipEffectImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="② 선택 규칙의 기본값 — '효과를 받지 않는 카드'(예: 붉은 눈의 초월흑룡)를 대상 후보에서 제외합니다. **릴리스(hint=Release)는 제외하지 않습니다**(제물로는 쓸 수 있음). 목록이 비어 있으면 아무 동작도 하지 않습니다 (2026-11-02)"
-                          Checked="OnSkipEffectImmuneChanged" Unchecked="OnSkipEffectImmuneChanged">
-                    <TextBlock Text="효과 면역 카드 대상 제외 — 릴리스 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkSkipEffectImmuneNegate" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="[무효화 카드] 목록(뵐러·포영)이 [효과 면역 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 대상 후보가 그 카드 하나뿐(n=1)일 때도 카드를 아낍니다. 목록에 없는 카드(노모어벳 등)는 막지 않습니다 (2026-11-02)"
-                          Checked="OnSkipEffectImmuneNegateChanged" Unchecked="OnSkipEffectImmuneNegateChanged">
-                    <TextBlock Text="무효화 카드는 효과 면역 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkSkipDestructImmuneDestroy" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="[파괴 카드] 목록(유령토끼 등)이 [파괴 내성 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 'Cannot be destroyed by card effects' 몬스터에 유령토끼를 쓰는 낭비를 막습니다 (2026-11-02)"
-                          Checked="OnSkipDestructImmuneDestroyChanged" Unchecked="OnSkipDestructImmuneDestroyChanged">
-                    <TextBlock Text="파괴 카드는 파괴 내성 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                <CheckBox x:Name="ChkAndroidSafe" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
-                          ToolTip="Windows/Android **둘 다** 같은 DLL 로 돌아가야 하므로, 안드로이드 트리밍 BCL 에 없는 API(File.ReadAllText · Path.GetTempPath · LINQ Any/OrderBy/FirstOrDefault 등)가 생성 코드에 있으면 [생성 + 컴파일] 을 중단합니다 (2026-11-02)"
-                          Checked="OnAndroidSafeChanged" Unchecked="OnAndroidSafeChanged">
-                    <TextBlock Text="Android 안전 검사 (기본: 켜짐)" TextWrapping="Wrap"/>
-                </CheckBox>
-                                        <TextBlock Text="소환 존 · 표시 형식 · 금지 세부는 ①③ 탭의 각 규칙 행에서 지정합니다 (전역 설정 없음)"
-                                                   Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
-                                        <TextBlock Text="현재 규칙 요약은 아래 [규칙 저장] 줄에 표시됩니다"
-                                                   Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-                        </ScrollViewer>
-                    </Grid>
 
                     <!-- ================= 규칙 서브탭 (B-9: ①~⑤ 는 ⚙ AI 설정 하위) ================= -->
                     <TabControl x:Name="RuleTabs" Grid.Row="1" Margin="0,0,0,6">
@@ -585,7 +210,384 @@
                         </TabControl.Resources>
                         <!-- ================= 규칙 서브탭 ①~⑤ (B-9) ================= -->
 
-                        <!-- 행동 + 조건 -->
+                        <!-- ⑤ 전개 루트보다 먼저: 기본/전역 설정 -->
+                            <TabItem Header="0. 기본 · 전역">
+                        <Grid x:Name="PnlSettingsCard" Margin="0,0,0,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                                <TextBlock Text="기본 / 전역 설정" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <!-- 2026-11-02 (A-6): 설정 검색 — 입력하면 자동으로 펼쳐지고 매칭 행만 남는다 -->
+                                <TextBox x:Name="TxtSettingsSearch" Width="170" MinHeight="24" Margin="14,0,0,0" VerticalAlignment="Center"
+                                         Style="{DynamicResource ThemedTextBox}"
+                                         ToolTip="설정 항목 검색(이름·툴팁). 입력하면 설정 카드가 자동으로 펼쳐지고 해당 항목만 남습니다. Esc = 지우기"
+                                         TextChanged="OnSettingsSearchChanged" KeyDown="OnSettingsSearchKeyDown"/>
+                                <TextBlock x:Name="TxtSettingsSearchInfo" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
+                                           Foreground="{DynamicResource HintFg}"/>
+                            </DockPanel>
+    
+                            <ScrollViewer Grid.Row="1" x:Name="PnlSettings" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" MinWidth="360"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="*" MinWidth="360"/>
+                                    </Grid.ColumnDefinitions>
+    
+                                    <!-- 왼쪽: 엔진 / 봇 -->
+                                    <Border Grid.Column="0" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
+                                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                        <StackPanel>
+                                            <TextBlock Text="엔진 / 봇" FontWeight="Bold" Margin="0,0,0,6"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="110"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="110"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="엔진" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold"/>
+                                                <TextBox Grid.Column="1" x:Name="TxtEngineName" Text="MyDeck" TextChanged="OnEngineNameChanged"/>
+                                                <TextBlock Grid.Column="2" Text="설명" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <TextBox Grid.Column="3" x:Name="TxtEngineDesc" Text="커스텀 덱 AI"/>
+                                            </Grid>
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <CheckBox x:Name="ChkFreePlay" Content="자유 플레이" IsChecked="True" VerticalAlignment="Center"
+                                                          ToolTip="규칙을 지정하지 않은 행동 유형은 기본 AI 동작을 자동 추가합니다"/>
+                                                <CheckBox x:Name="ChkDebugEffect" Content="효과번호 기록" Margin="14,0,0,0" VerticalAlignment="Center"
+                                                          ToolTip="발동 시 카드ID/효과번호(desc)를 WindBot 콘솔에 기록합니다"/>
+                                            </WrapPanel>
+    
+                                            <!-- B-15: 자유 플레이에 마법/함정 세트(SpellSet) 추가 — 기본 OFF -->
+                                            <CheckBox x:Name="ChkFreePlaySetSpell" Margin="0,8,0,0" VerticalAlignment="Center"
+                                                      Checked="OnFreePlaySetSpellChanged" Unchecked="OnFreePlaySetSpellChanged"
+                                                      ToolTip="자유 플레이에 ExecutorType.SpellSet 을 추가합니다 — 함정·속공은 패에서 발동할 수 없어 세트만 가능하므로, 이 옵션이 없으면 패에서 썩습니다">
+                                                <TextBlock Text="자유 플레이 시 마법/함정도 세트" TextWrapping="Wrap"/>
+                                            </CheckBox>
+                                            <Grid x:Name="PnlFreePlaySetSpell" Margin="20,6,0,0" Visibility="Collapsed">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <Grid Grid.Row="0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="150"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*" MinWidth="120"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="종류" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <ComboBox Grid.Column="1" x:Name="CmbFreePlaySetKind" Style="{DynamicResource ThemedComboBox}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Id"
+                                                              ToolTip="세트할 카드 종류 — 전체(마법+함정) / 함정만 / 속공 마법만"/>
+                                                    <TextBlock Grid.Column="2" Text="제외 카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                    <controls:CardNameBox Grid.Column="3" x:Name="CardFreePlaySetExclude"
+                                                                          AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                          ToolTip="패트랩처럼 세트하면 안 되는 카드 — 고르고 [추가]"/>
+                                                    <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddFreePlaySetExclude"
+                                                            ToolTip="선택한 카드를 세트 제외 목록에 추가"/>
+                                                    <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearFreePlaySetExclude"
+                                                            ToolTip="세트 제외 목록을 비웁니다"/>
+                                                </Grid>
+                                                <TextBlock Grid.Row="1" x:Name="TxtFreePlaySetExclude" Text="(없음)" FontSize="11" Margin="0,4,0,0"
+                                                           Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="세트하지 않을 카드 목록"/>
+                                            </Grid>
+                                            <!-- B-16: 자유 플레이에서 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음 — 기본 ON -->
+                                            <CheckBox x:Name="ChkFreePlayProtectExtra" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                                                      ToolTip="릴리스/제물 후보에서 융합·싱크로·엑시즈·링크 몬스터를 뺍니다 (소재 사용은 그대로 허용). 남은 후보가 min 미만이면 원래 목록을 씁니다 — 엔진 오류 방지">
+                                                <TextBlock Text="자유 플레이 시 엑스트라 덱 몬스터를 릴리스/제물로 쓰지 않음" TextWrapping="Wrap"/>
+                                            </CheckBox>
+                                            <!-- B-46: B-18 제물 여력 가드 예외 카드 (무제물 일반소환 카드) -->
+                                            <Grid Margin="20,4,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="150"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="제물 가드 예외" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                           ToolTip="제물이 부족해도 소환을 시도할 카드 (무제물 일반소환 효과가 있는 카드)"/>
+                                                <TextBlock Grid.Column="1" Text="(제물 없이 소환 가능한 카드)" VerticalAlignment="Center"
+                                                           FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="3" x:Name="CardTributeGuardExcept"
+                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                      ToolTip="예) 레이즈 문의 고풍 캐롤 100458017 — 제물 2장이 없어도 무제물 일반소환을 시도합니다"/>
+                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddTributeGuardExcept"
+                                                        ToolTip="선택한 카드를 제물 가드 예외 목록에 추가"/>
+                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearTributeGuardExcept"
+                                                        ToolTip="예외 목록을 비웁니다"/>
+                                            </Grid>
+                                            <TextBlock Margin="20,2,0,0" x:Name="TxtTributeGuardExcept" Text="(없음)" FontSize="11"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="제물 여력 가드를 통과할 카드 목록 (B-18/B-46)"/>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="파괴 내성 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                           ToolTip="카드 효과로 파괴되지 않는 카드 — '상대 파괴 가능 몬스터 수' 계산에서 제외합니다 (예: 태양신의 수호자-갓 슬라임 101403073)"/>
+                                                <TextBlock Grid.Column="1" Text="(효과로 파괴 불가인 카드)" VerticalAlignment="Center"
+                                                           FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="3" x:Name="CardDestructibleImmune"
+                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                      ToolTip="예) 태양신의 수호자-갓 슬라임 101403073 — EFFECT_INDESTRUCTABLE_EFFECT"/>
+                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestructibleImmune"
+                                                        ToolTip="선택한 카드를 파괴 내성 목록에 추가"/>
+                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestructibleImmune"
+                                                        ToolTip="파괴 내성 목록을 비웁니다"/>
+                                            </Grid>
+                                            <TextBlock Margin="20,2,0,0" x:Name="TxtDestructibleImmune" Text="(없음)" FontSize="11"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="파괴 가능 몬스터 수 계산에서 제외할 카드 목록"/>
+                                            <DockPanel Margin="20,6,0,0">
+                                                <Button x:Name="BtnDestructCandAdd" DockPanel.Dock="Left" Content="후보 추가" Margin="0,0,6,0"
+                                                        Click="OnAddDestructCandidates"
+                                                        ToolTip="실전에서 '파괴를 시도했는데 안 죽은' 카드를 위 목록에 넣습니다. 넣은 뒤 [규칙 저장] → [생성 + 컴파일] → WindBot 재시작 (2026-11-01)"/>
+                                                <Button x:Name="BtnDestructCandIgnore" DockPanel.Dock="Left" Content="무시" Margin="0,0,8,0"
+                                                        Click="OnIgnoreDestructCandidates"
+                                                        ToolTip="지금 보이는 후보를 다시 보지 않습니다 (파괴 무효로 실패한 오탐 정리용)"/>
+                                                <TextBlock x:Name="TxtDestructCand" Text="(관찰된 후보 없음)" FontSize="11" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="duel-log 의 destruct-fail 기록에서 모은 후보입니다 — 자동 등록은 하지 않습니다"/>
+                                            </DockPanel>
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="효과 면역 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                           ToolTip="'다른 카드의 효과를 받지 않는' 카드 — 대상 선택에서 제외합니다(릴리스는 예외). 예: 17242023 붉은 눈의 초월흑룡 (Unaffected by your opponent's activated monster and Spell effects)"/>
+                                                <TextBlock Grid.Column="1" Text="(효과를 받지 않는 카드)" VerticalAlignment="Center"
+                                                           FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="3" x:Name="CardEffectImmune"
+                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                      ToolTip="예) 17242023 붉은 눈의 초월흑룡 — Unaffected by your opponent's activated monster and Spell effects"/>
+                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddEffectImmune"
+                                                        ToolTip="선택한 카드를 효과 면역 목록에 추가"/>
+                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearEffectImmune"
+                                                        ToolTip="효과 면역 목록을 비웁니다"/>
+                                            </Grid>
+                                            <TextBlock Margin="20,2,0,0" x:Name="TxtEffectImmune" Text="(없음)" FontSize="11"
+                                                       Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="대상 선택에서 제외할 '효과를 받지 않는' 카드 목록 (2026-11-02)"/>
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="무효화 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                           ToolTip="뵐러·무한포영처럼 '효과를 무효화'하는 카드 — 위 효과 면역 카드의 효과에 **체인하지 않습니다**(발동 자체 차단). 목록에 없는 카드(노모어벳 등)는 막지 않습니다"/>
+                                                <TextBlock Grid.Column="1" Text="(위 면역 카드에 체인 금지)" VerticalAlignment="Center"
+                                                           FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="3" x:Name="CardNegate"
+                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                      ToolTip="예) 97268402 Effect Veiler / 10045474 무한포영"/>
+                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddNegate"
+                                                        ToolTip="선택한 카드를 무효화 카드 목록에 추가"/>
+                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearNegate"
+                                                        ToolTip="무효화 카드 목록을 비웁니다"/>
+                                            </Grid>
+                                            <DockPanel Margin="20,2,0,0">
+                                                <Button x:Name="BtnNegateDefault" DockPanel.Dock="Left" Content="기본값(뵐러·포영)" Margin="0,0,8,0"
+                                                        Click="OnNegateDefaults"
+                                                        ToolTip="뵐러(97268402)와 무한포영(10045474)을 목록에 넣습니다"/>
+                                                <TextBlock x:Name="TxtNegate" Text="(없음)" FontSize="11" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="발동을 막을 무효화 카드 목록 (2026-11-02)"/>
+                                            </DockPanel>
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="120"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="파괴 카드" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                           ToolTip="유령토끼처럼 '그 카드를 파괴한다' 계열 — 위 [파괴 내성 카드] 의 효과에 **체인하지 않습니다**(발동 자체 차단)"/>
+                                                <TextBlock Grid.Column="1" Text="(파괴 내성 카드에 체인 금지)" VerticalAlignment="Center"
+                                                           FontSize="11" Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="카드" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="3" x:Name="CardDestroy"
+                                                                      AllowEmpty="True" EmptyLabel="(카드 검색)"
+                                                                      ToolTip="예) 59438930/59438931 유령토끼 (Ghost Ogre &amp; Snow Rabbit)"/>
+                                                <Button Grid.Column="4" Content="추가" Margin="6,0,0,0" Click="OnAddDestroyCard"
+                                                        ToolTip="선택한 카드를 파괴 카드 목록에 추가"/>
+                                                <Button Grid.Column="5" Content="비우기" Margin="6,0,0,0" Click="OnClearDestroyCard"
+                                                        ToolTip="파괴 카드 목록을 비웁니다"/>
+                                            </Grid>
+                                            <DockPanel Margin="20,2,0,0">
+                                                <Button x:Name="BtnDestroyDefault" DockPanel.Dock="Left" Content="기본값(유령토끼)" Margin="0,0,8,0"
+                                                        Click="OnDestroyDefaults"
+                                                        ToolTip="유령토끼(59438930, 59438931)을 목록에 넣습니다"/>
+                                                <TextBlock x:Name="TxtDestroy" Text="(없음)" FontSize="11" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource HintFg}" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="발동을 막을 파괴 카드 목록 (2026-11-02)"/>
+                                            </DockPanel>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="140"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="140"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="가위바위보" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox Grid.Column="1" x:Name="CmbRps" Style="{DynamicResource ThemedComboBox}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Id"/>
+                                                <TextBlock Grid.Column="2" Text="이겼을 때" VerticalAlignment="Center" Margin="12,0,6,0"/>
+                                                <ComboBox Grid.Column="3" x:Name="CmbTurnChoice" Style="{DynamicResource ThemedComboBox}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Id"/>
+                                                <TextBlock Grid.Column="4" Text="선공/후공은 [생성 + 컴파일] 후 적용"
+                                                           Foreground="{DynamicResource HintFg}" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                                            </Grid>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="150"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="대사" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox Grid.Column="1" x:Name="CmbDialog" Style="{DynamicResource ThemedComboBox}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Id"/>
+                                                <Button Grid.Column="2" Content="대사 편집" Margin="8,0,0,0" Click="OnEditEngineDialog"/>
+                                            </Grid>
+                                            <TextBlock Text="대사는 이 엔진 전용입니다 (EDOPro 가 실행하는 봇에도 적용 · 재컴파일 필요)"
+                                                       Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+    
+                                    <!-- 오른쪽: 동작 세부 -->
+                                    <Border Grid.Column="2" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
+                                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                        <StackPanel>
+                                            <TextBlock Text="동작 세부" FontWeight="Bold" Margin="0,0,0,6"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="150"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="체인 중복 기준" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox Grid.Column="1" x:Name="CmbChainBasis" Style="{DynamicResource ThemedComboBox}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Id"
+                                                          ToolTip="'체인당 N회 제한' 이 같은 카드/이름/테마를 몇 번까지 허용할지 판정하는 기준"/>
+                                                <TextBlock Grid.Column="2" Text="'체인당 N회 제한' 판정 기준"
+                                                           Foreground="{DynamicResource HintFg}" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                                            </Grid>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*" MinWidth="150"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="열 회피 카드" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <controls:CardNameBox Grid.Column="1" x:Name="CardAvoidColumn"
+                                                                      AllowEmpty="True" EmptyLabel="(없음)"/>
+                                                <TextBlock Grid.Column="2" Text="그 카드가 놓인 세로열에 마법/함정을 두지 않음"
+                                                           Foreground="{DynamicResource HintFg}" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                                            </Grid>
+                                            <CheckBox x:Name="ChkSameNameAliases" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                                                      ToolTip="cdb 의 카드 이름이 같으면 같은 카드로 취급합니다. 예) 59438930 ↔ 59438931 (유령토끼 · 다른 일러) — 금지/행동/선택/조건/열 회피 규칙이 그룹 전체에 적용됩니다">
+                                                <TextBlock Text="같은 이름 카드(대체 일러·재록)도 같은 카드로 취급" TextWrapping="Wrap"/>
+                                            </CheckBox>
+                    <CheckBox x:Name="ChkShowPreErrata" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="에라타 전 카드(이름에 (Pre-Errata))를 카드 검색에 표시합니다. EDOPro 에서 별도 카드/스크립트라 쓰지 않으면 숨기는 게 안전합니다"
+                              Checked="OnShowPreErrataChanged" Unchecked="OnShowPreErrataChanged">
+                        <TextBlock Text="에라타 전 카드도 검색에 표시 (기본: 숨김)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="기본 표시형식" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="CmbDefaultPosition" Width="140" Style="{DynamicResource ThemedComboBox}"
+                                  ItemsSource="{Binding Source={x:Static local:MainWindow.Positions}}"
+                                  SelectedValuePath="Id" DisplayMemberPath="Label"
+                                  SelectionChanged="OnDefaultPositionChanged"
+                                  ToolTip="① 행동 / ② 선택에서 표시형식을 지정하지 않은 카드를 소환할 때의 기본값 (기본: 공격 표시). 세트는 항상 뒷면 수비"/>
+                    </StackPanel>
+                    <CheckBox x:Name="ChkLinkPlace" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="N-5: 소환할 존을 고를 때 상대 링크 몬스터가 링크 중인 존을 피하고, 내 링크 존을 선호합니다 (기본: 꺼짐 / 링크 덱이 아니면 효과 없음)"
+                              Checked="OnLinkPlaceChanged" Unchecked="OnLinkPlaceChanged">
+                        <TextBlock Text="링크 마커 기반 존 선택 (기본: 꺼짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkRouteAuthoritative" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="B-73: ⑤ 전개 루트를 '권장 순서'가 아니라 실제 순서로 강제합니다. 선택된 루트에 나오는 카드는 그 단계에 도달하기 전에는 ① 행동으로 나가지 못합니다(루트에 없는 카드·전개 종료 후에는 자유). 루트가 없으면 효과 없음 (2026-11-02)"
+                              Checked="OnRouteAuthoritativeChanged" Unchecked="OnRouteAuthoritativeChanged">
+                        <TextBlock Text="⑤ 루트 순서 강제 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkAttackOnlyWinnable" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="모든 상대를 비교해 이길 수 있는(내 공격력 &gt; 상대 공격력/수비력) 대상이 하나도 없으면 배틀 페이즈를 종료합니다. 이길 수 있으면 가장 위협적인 상대를 가장 약한 내 몬스터로 공격합니다"
+                              Checked="OnAttackOnlyWinnableChanged" Unchecked="OnAttackOnlyWinnableChanged">
+                        <TextBlock Text="이길 수 없으면 공격하지 않음 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkSkipResistantGlobal" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="② 선택 규칙의 기본값 — 대상 선택 전에 내성 몹(대상/효과 보호: IsMonsterInvincible / IsShouldNotBeTarget / IsShouldNotBeMonsterTarget / IsShouldNotBeSpellTrapTarget)을 후보에서 제외합니다. 규칙별 [내성 제외] 를 [제외 안 함] 으로 두면 그 규칙만 무시합니다 (2026-11-01)"
+                              Checked="OnSkipResistantGlobalChanged" Unchecked="OnSkipResistantGlobalChanged">
+                        <TextBlock Text="내성 몹 대상 제외 — 전체 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkSkipDestructImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="파괴 선택(hint=Destroy)일 때 '파괴되지 않는 카드'를 후보에서 제외합니다. WindBot 내장 파괴불가 목록 + [파괴 내성 카드] 목록을 봅니다. 전부 파괴 불가면 원래 목록을 씁니다 (2026-11-01)"
+                              Checked="OnSkipDestructImmuneChanged" Unchecked="OnSkipDestructImmuneChanged">
+                        <TextBlock Text="파괴 선택에서 파괴 내성 카드 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkSkipEffectImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="② 선택 규칙의 기본값 — '효과를 받지 않는 카드'(예: 붉은 눈의 초월흑룡)를 대상 후보에서 제외합니다. **릴리스(hint=Release)는 제외하지 않습니다**(제물로는 쓸 수 있음). 목록이 비어 있으면 아무 동작도 하지 않습니다 (2026-11-02)"
+                              Checked="OnSkipEffectImmuneChanged" Unchecked="OnSkipEffectImmuneChanged">
+                        <TextBlock Text="효과 면역 카드 대상 제외 — 릴리스 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkSkipEffectImmuneNegate" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="[무효화 카드] 목록(뵐러·포영)이 [효과 면역 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 대상 후보가 그 카드 하나뿐(n=1)일 때도 카드를 아낍니다. 목록에 없는 카드(노모어벳 등)는 막지 않습니다 (2026-11-02)"
+                              Checked="OnSkipEffectImmuneNegateChanged" Unchecked="OnSkipEffectImmuneNegateChanged">
+                        <TextBlock Text="무효화 카드는 효과 면역 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkSkipDestructImmuneDestroy" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="[파괴 카드] 목록(유령토끼 등)이 [파괴 내성 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 'Cannot be destroyed by card effects' 몬스터에 유령토끼를 쓰는 낭비를 막습니다 (2026-11-02)"
+                              Checked="OnSkipDestructImmuneDestroyChanged" Unchecked="OnSkipDestructImmuneDestroyChanged">
+                        <TextBlock Text="파괴 카드는 파괴 내성 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkAndroidSafe" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
+                              ToolTip="Windows/Android **둘 다** 같은 DLL 로 돌아가야 하므로, 안드로이드 트리밍 BCL 에 없는 API(File.ReadAllText · Path.GetTempPath · LINQ Any/OrderBy/FirstOrDefault 등)가 생성 코드에 있으면 [생성 + 컴파일] 을 중단합니다 (2026-11-02)"
+                              Checked="OnAndroidSafeChanged" Unchecked="OnAndroidSafeChanged">
+                        <TextBlock Text="Android 안전 검사 (기본: 켜짐)" TextWrapping="Wrap"/>
+                    </CheckBox>
+                                            <TextBlock Text="소환 존 · 표시 형식 · 금지 세부는 ①③ 탭의 각 규칙 행에서 지정합니다 (전역 설정 없음)"
+                                                       Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock Text="현재 규칙 요약은 아래 [규칙 저장] 줄에 표시됩니다"
+                                                       Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </ScrollViewer>
+                        </Grid>
+                            </TabItem>
                         <TabItem Header="① 행동 · 조건">
                             <Grid Margin="6">
                                 <Grid.RowDefinitions>
@@ -919,6 +921,15 @@
                                                     <CheckBox IsChecked="{Binding SkipEffectUsed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
                                                               ToolTip="이번 턴 이미 효과를 발동한 상대 몬스터를 후보에서 제외합니다 (뵐러·무한포영을 아껴 쓴다). 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-01 신규)"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="상대만" Width="70">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding OnlyEnemy, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                              ToolTip="상대(컨트롤러 != 0) 카드만 후보로 남깁니다 — 네필 e2 처럼 '상대 몹만 소재로' 쓸 때. 남은 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-02 신규)"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -1587,17 +1598,19 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="*" MinHeight="200"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="160"/>
                                     </Grid.RowDefinitions>
 
                                     <DockPanel Grid.Row="0" Margin="0,0,0,6">
                                         <Button Content="+ 루트" Click="OnAddRouteSet" FontWeight="SemiBold"
                                                 ToolTip="이 트랙(선공/후공)에 루트를 한 벌 더 추가합니다"/>
+                                        <Button Content="− 루트" Click="OnRemoveRouteSet" Margin="6,0,0,0" FontWeight="SemiBold"
+                                                ToolTip="선택한 루트 한 벌을 삭제합니다 (목록에서 고른 뒤 클릭, 또는 목록에서 Delete 키)"/>
                                         <Button Content="+ 단계 추가" Click="OnAddRoute" Margin="8,0,0,0" FontWeight="SemiBold"
                                                 ToolTip="선택한 루트의 끝에 단계를 추가합니다"/>
                                         <Button Content="리플레이 가져오기" Click="OnImportReplay" Margin="8,0,0,0" FontWeight="SemiBold"
                                                 ToolTip="패 테스트 등에서 전개 루트만 기록한 리플레이를 요구합니다. 선택된 트랙의 루트를 모두 지우고 '리플레이' 1벌로 교체합니다."/>
+                                        <Button x:Name="BtnShowRoutedCode" Content="⑤ 생성 코드" Click="OnShowRoutedCode" Margin="8,0,0,0"
+                                                ToolTip="생성된 C# 에서 ⑤ 루트 선택(SelectRouteFirst/Second)·② 카드 선택·CountCard 를 읽기 전용으로 봅니다"/>
                                         <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" FontSize="11"
                                                    Foreground="{DynamicResource HintFg}" TextWrapping="Wrap"
                                                    Text="트랙마다 루트 N벌 · 기본이 아닌 루트를 위에서부터 조건 검사 → 처음 만족한 1벌만 실행 · 없으면 기본 루트 · 기본도 없으면 전개 안 함"/>
@@ -1622,7 +1635,7 @@
                                     </Border>
 
                                     <!-- 좌: 루트 목록 / 우: 선택한 루트의 단계 카드 -->
-                                    <Grid Grid.Row="3">
+                                    <Grid Grid.Row="3" MaxHeight="{Binding ViewportHeight, ElementName=ScrollRouteTab}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="250" MinWidth="170"/>
                                             <ColumnDefinition Width="6"/>
@@ -1642,6 +1655,7 @@
                                             </DockPanel>
                                             <Grid MinHeight="140">
                                                 <ListBox x:Name="ListRouteSets" SelectionChanged="OnRouteSetSelected"
+                                                         KeyDown="OnRouteSetsKeyDown"
                                                          MinHeight="140"
                                                          Background="{DynamicResource SubtleBg}"
                                                          BorderBrush="{DynamicResource BorderBrush2}"
@@ -1697,10 +1711,13 @@
                                                                             Background="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"/>
                                                                     <StackPanel Grid.Column="1" Margin="10,8,10,10">
                                                                         <DockPanel Margin="0,0,0,4">
+                                                                            <Button DockPanel.Dock="Right" Content="조건 편집" Margin="6,0,0,0" Click="OnShowStepConditions" ToolTip="이 단계의 순위별 조건을 팝업에서 편집합니다 (스크롤 불필요, 2026-11-02)"/>
                                                                             <Button DockPanel.Dock="Right" Content="삭제" Margin="6,0,0,0" Click="OnRemoveRouteStep"/>
                                                                             <Button DockPanel.Dock="Right" Content="▼" Width="30" Margin="4,0,0,0" Click="OnMoveRouteStepDown"/>
                                                                             <Button DockPanel.Dock="Right" Content="▲" Width="30" Margin="4,0,0,0" Click="OnMoveRouteStepUp"/>
-                                                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" MinWidth="56"
+                                                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" MinWidth="56" Cursor="Hand"
+                                                                                       MouseLeftButtonUp="OnShowStepConditions"
+                                                                                       ToolTip="클릭하면 이 단계의 조건 편집 팝업이 열립니다"
                                                                                        VerticalAlignment="Center"
                                                                                        Foreground="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ItemsControl}}}"/>
                                                                             <TextBlock Text="메모" Margin="8,0,4,0" VerticalAlignment="Center"
@@ -1748,161 +1765,27 @@
                                         </Grid>
                                     </Grid>
 
-                                    <DockPanel Grid.Row="4" Margin="0,8,0,4">
-                                        <TextBlock x:Name="TxtRouteCondHeader" Text="루트를 선택하면 진입 조건을, 순위 [조건]을 누르면 그 순위 조건을 편집합니다"
-                                                   FontWeight="Bold" VerticalAlignment="Center"/>
-                                        <Button Content="조건 추가" Margin="8,0,0,0" Click="OnAddRouteCond"/>
-                                        <Button Content="삭제" Margin="4,0,0,0" Click="OnRemoveRouteCond"/>
-                                        <Button Content="카드 선택" Margin="8,0,0,0" Click="OnPickRouteCondCard"/>
-                                        <TextBlock Text="연결(and/or)로 AND·OR 혼합 · 루트 진입 조건이 비어 있으면 항상 그 루트를 선택"
-                                                   Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                                    </DockPanel>
-
-                                    <DataGrid Grid.Row="5" x:Name="GridRouteConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
-                                        <DataGrid.Columns>
-                                            <DataGridTemplateColumn Header="연결" Width="54">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <Grid>
-                                                            <ComboBox ItemsSource="{Binding Source={x:Static local:MainWindow.Joins}}"
-                                                                      SelectedItem="{Binding Join, UpdateSourceTrigger=PropertyChanged}"
-                                                                      ToolTip="앞 조건과의 연결(and/or). 첫 조건은 무시됩니다.">
-                                                                <ComboBox.Style>
-                                                                    <Style TargetType="ComboBox" BasedOn="{StaticResource ThemedComboBox}">
-                                                                        <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
-                                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                                            </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                    </Style>
-                                                                </ComboBox.Style>
-                                                            </ComboBox>
-                                                            <TextBlock Text="—" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                                       Foreground="{DynamicResource SubtleFg}"
-                                                                       ToolTip="첫 조건 — 연결값은 사용되지 않습니다">
-                                                                <TextBlock.Style>
-                                                                    <Style TargetType="TextBlock">
-                                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                                        <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding JoinEnabled}" Value="False">
-                                                                                <Setter Property="Visibility" Value="Visible"/>
-                                                                            </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                    </Style>
-                                                                </TextBlock.Style>
-                                                            </TextBlock>
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Width="52">
-                                                <DataGridTemplateColumn.Header>
-                                                    <TextBlock Text="그룹" ToolTip="조건 그룹(괄호). 같은 번호끼리 먼저 묶이고, 그룹 사이는 그룹 첫 조건의 연결(and/or)로 이어집니다. 같은 색 = 같은 괄호. 0(—) = 기본. 예: A(0) · B(1) · C(1,or) → A &amp;&amp; (B || C)"/>
-                                                </DataGridTemplateColumn.Header>
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <Border CornerRadius="3" Padding="1"
-                                                                Background="{Binding Group, Converter={StaticResource GroupBrush}}"
-                                                                ToolTip="{Binding GroupBadge}">
-                                                            <ComboBox Style="{DynamicResource ThemedComboBox}" Height="22" BorderThickness="0"
-                                                                      Background="Transparent" Foreground="White" FontWeight="Bold"
-                                                                      ItemsSource="{Binding Source={x:Static local:MainWindow.CondGroupNumbers}}"
-                                                                      SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                      ToolTip="그룹 번호 — 같은 번호가 연속이면 한 괄호로 묶입니다. (배지 괄호는 (시작 / )끝 · 색=같은 그룹)"/>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="조건" Width="176">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.ConditionKinds}}"
-                                                                  SelectedItem="{Binding KindName, UpdateSourceTrigger=PropertyChanged}"
-                                                                  DisplayMemberPath="Label"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="비교" Width="54">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Ops}}"
-                                                                  SelectedItem="{Binding Op, UpdateSourceTrigger=PropertyChanged}"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTextColumn Header="값" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
-                                        <DataGridTextColumn Binding="{Binding Count, UpdateSourceTrigger=PropertyChanged}" Width="52">
-                                            <DataGridTextColumn.Header>
-                                                <TextBlock Text="장수" ToolTip="B-20: [필드에 레벨 N 몬스터 M장 이상] 조건의 M (장수). 다른 조건에서는 무시됩니다. 0 = 1장"/>
-                                            </DataGridTextColumn.Header>
-                                        </DataGridTextColumn>
-                                            <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
-                                            <DataGridTemplateColumn Header="카드명 (이름으로 검색)" Width="*" MinWidth="150">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <controls:CardNameBox CardId="{Binding Card, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                              AllowEmpty="True" EmptyLabel="(없음)"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="대상(누가)" Width="78">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.Sides}}"
-                                                                  SelectedValuePath="Id" DisplayMemberPath="Label"
-                                                                  IsEnabled="{Binding SideEditable}"
-                                                                  SelectedValue="{Binding Side, UpdateSourceTrigger=PropertyChanged}"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="종족" Width="118">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <controls:OptionSearchBox Options="{Binding Source={x:Static local:MainWindow.Races}}"
-                                                                                  SelectedCode="{Binding RaceId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                                  AllowZero="True" ZeroLabel="전체 (종족 무관)"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="테마" Width="160">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <controls:OptionSearchBox Options="{Binding Source={x:Static local:MainWindow.Themes}}"
-                                                                                  SelectedCode="{Binding ThemeCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                                  IsEnabled="{Binding ThemeEditable}"
-                                                                                  AllowZero="True" ZeroLabel="전체 (테마 무관)"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="몬스터만" Width="68">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <CheckBox IsChecked="{Binding MonsterOnly, UpdateSourceTrigger=PropertyChanged}"
-                                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                                  IsEnabled="{Binding ThemeEditable}"
-                                                                  ToolTip="테마 조건에서 몬스터만 (Data.Type &amp; 0x1)"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTemplateColumn Header="부정(!)" Width="62">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <CheckBox IsChecked="{Binding Not, UpdateSourceTrigger=PropertyChanged}"
-                                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                                  ToolTip="조건을 부정합니다 → !(조건)"/>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
+<!-- 2026-11-02 (A): 조건 편집은 단계 카드 → [조건 편집] 팝업(RouteStepWindow)에서 한다 -->
+</Grid>
                             </ScrollViewer>
                         </TabItem>
 
                     </TabControl>
 
+                    <!-- 2026-11-02 (B-80): 조건 **생성식 미리보기** — ①②③ 조건 그리드 공통(선택/편집 시 갱신).
+                         ⑤ 는 단계 조건 팝업 안에 같은 미리보기가 있다. -->
+                    <Border Grid.Row="2" x:Name="PnlCondPreview" BorderThickness="1" CornerRadius="4" Margin="0,0,0,6"
+                            BorderBrush="{DynamicResource BorderBrush2}" Background="{DynamicResource InputBg}" Padding="8,4">
+                        <DockPanel>
+                            <Button x:Name="BtnCopyCondExpr" DockPanel.Dock="Right" Content="복사" MinHeight="24" MinWidth="56"
+                                    Margin="8,0,0,0" Click="OnCopyCondExpr" ToolTip="지금 보이는 생성식을 클립보드로 복사"/>
+                            <TextBlock x:Name="TxtCondPreview" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"
+                                       Foreground="{DynamicResource TextFg}"
+                                       Text="조건식을 보려면 조건 행을 선택하세요 — ① 행동 · ② 선택 · ③ 금지 공통"/>
+                        </DockPanel>
+                    </Border>
                     <!-- 실행 버튼 + 현재 규칙 요약 -->
-                    <StackPanel Grid.Row="2" Margin="0,4,0,6">
+                    <StackPanel Grid.Row="3" Margin="0,4,0,6">
                         <WrapPanel>
                             <Button Content="규칙 저장 (JSON)" Click="OnSaveProfile" FontWeight="SemiBold"/>
                             <Button Content="규칙 불러오기" Margin="6,0,0,0" Click="OnLoadProfile"/>
@@ -1933,7 +1816,7 @@
                         </Grid>
                     </StackPanel>
 
-                    <TextBox Grid.Row="3" x:Name="TxtBuildLog" IsReadOnly="True" FontFamily="Consolas"
+                    <TextBox Grid.Row="4" x:Name="TxtBuildLog" IsReadOnly="True" FontFamily="Consolas"
                              MinHeight="80"
                              FontSize="11.5" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                              TextWrapping="NoWrap" Background="{DynamicResource SubtleBg}"/>

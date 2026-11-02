@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.IO;
 using System.Text.Json;
@@ -255,6 +255,20 @@ public partial class App : Application
             // 2026-11-02 (B-59): 파괴 카드 목록 + 파괴 내성 카드 체인 금지(발동 차단)
             total = problems.Count;
             problems.AddRange(w.VerifyDestroyCardUi());
+            for (var i = total; i < problems.Count; i++)
+                Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
+
+            // 2026-11-02 (B-72): ⑤ 루트 목록에서 루트 삭제 (− 루트 버튼 / Delete 키)
+            total = problems.Count;
+            problems.AddRange(w.VerifyRouteDeleteUi());
+            problems.AddRange(w.VerifyRouteAuthoritativeUi());
+            problems.AddRange(w.VerifyGeneratedCodeUi());
+            problems.AddRange(w.VerifyRouteSearchUi());
+            problems.AddRange(w.VerifyRouteStepPopupUi());
+            problems.AddRange(w.VerifyCondPreviewUi());
+            problems.AddRange(w.VerifyRouteWindowUi());
+            problems.AddRange(w.VerifyRouteProbeUi());
+            problems.AddRange(w.VerifyRouteExactUi());
             for (var i = total; i < problems.Count; i++)
                 Console.Error.WriteLine("UICHECK PROBLEM " + problems[i]);
 

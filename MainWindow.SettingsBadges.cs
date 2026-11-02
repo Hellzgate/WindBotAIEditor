@@ -128,6 +128,7 @@ namespace WindBotAIEditor
             Chk("ChkSkipDestructImmuneDestroy", p => p.SkipDestructImmuneDestroy, true);
             Chk("ChkAttackOnlyWinnable", p => p.AttackOnlyWinnable, true);
             Chk("ChkLinkPlace", p => p.LinkPlaceAware, false);
+            Chk("ChkRouteAuthoritative", p => p.RouteAuthoritative, true);   // B-73
             Cmb("CmbDefaultPosition", p => p.DefaultSummonPosition, "attack");
 
             // ── 카드 DB / 기타 ──
