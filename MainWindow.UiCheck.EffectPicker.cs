@@ -787,8 +787,10 @@ namespace WindBotAIEditor
                     problems.Add("b73: ① 액션에 게이트가 없습니다");
                 if (onSrc.IndexOf("private int RouteStepFirst(", System.StringComparison.Ordinal) < 0)
                     problems.Add("b73: RouteStepFirst 표가 없습니다");
-                if (offSrc.IndexOf("RoutePending(", System.StringComparison.Ordinal) >= 0)
-                    problems.Add("b73: OFF 인데 게이트가 생성됨");
+                // 2026-11-03: B-85(routeGuard) 이후에는 OFF 여도 RoutePending **헬퍼 자체**는 배출된다
+                //   (RouteHoldNonRoute 가 그 안에서만 호출됨). 실제 차단은 ① 액션의 `!RoutePending(...)` 참조가 하므로 그것만 본다.
+                if (offSrc.IndexOf("!RoutePending(", System.StringComparison.Ordinal) >= 0)
+                    problems.Add("b73: OFF 인데 ① 액션 게이트가 생성됨");
 
                 if (problems.Count == 0)
                     System.Console.Error.WriteLine("b73 routeGate ok helper=OK gate=OK off=0");
@@ -1047,10 +1049,12 @@ namespace WindBotAIEditor
                 if (src.IndexOf("route first sel=", System.StringComparison.Ordinal) < 0)
                     problems.Add("b81: route sel 로그가 없습니다");
 
-                // 게이트 OFF(routeAuthoritative=false)면 이 코드가 0줄이어야 한다(회귀 방지)
+                // 게이트 OFF(routeAuthoritative=false)면 ① 액션 차단이 0줄이어야 한다(회귀 방지)
+                //   2026-11-03: 헬퍼(RoutePending 안의 창/홀드 코드)는 routeGuard 때문에 남으므로,
+                //   실제 차단 지점인 `!RoutePending(` 참조가 없는지로 판정한다.
                 pr.RouteAuthoritative = false;
                 var src2 = RuleCodeGen.Generate(pr);
-                if (src2.IndexOf("needF > _routeStep + 2", System.StringComparison.Ordinal) >= 0)
+                if (src2.IndexOf("!RoutePending(", System.StringComparison.Ordinal) >= 0)
                     problems.Add("b81: 게이트 OFF 인데 차단 코드가 생성되었습니다");
 
                 if (problems.Count == 0)

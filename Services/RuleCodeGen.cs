@@ -1181,6 +1181,10 @@ namespace WindBotAIEditor.Services
                 var srcList = "cards";
                 if (needFilter)
                 {
+                    // 2026-11-03: **릴리스 코스트 취소** — 후보가 전부 엑스트라 덱 몬스터면 선택을 취소해 보스를 지킨다.
+                    //   (발동 자체는 막지 않는다. WindBot 은 cancelable && 0장 → -1 로 응답해 코스트 미지불 → 발동 취소)
+                    if (isSelectCard && needProtectFilter)
+                        sb.AppendLine("            if (cancelable && hint == HintMsg.Release && cards != null && cards.Count > 0 && _releaseCancelTurn != Duel.Turn && AllExtraDeckMonsters(cards)) { _releaseCancelTurn = Duel.Turn; return new List<ClientCard>(); }   // 릴리스 코스트 취소(엑덱 보스 보호 · 턴당 1회)");
                     sb.AppendLine("            IList<ClientCard> allowedCards = cards;");
                     // B-16: 기존 선택 규칙/금지 필터 본문 **앞에** 한 줄만 끼워 넣는다 (중복 정의 방지)
                     if (needProtectFilter)
@@ -1197,7 +1201,7 @@ namespace WindBotAIEditor.Services
                     if (needEffectImmuneFilter)
                         sb.AppendLine("            if (hint != HintMsg.Release) allowedCards = FilterEffectImmune(allowedCards, min);   // 2026-11-02: 효과 면역 카드 대상 제외(릴리스는 예외)");
                         if (isSelectCard && p.RouteGuard && (hasFirstRoute || hasSecondRoute))
-                            sb.AppendLine("            if (hint == HintMsg.Release || hint == HintMsg.Discard || hint == HintMsg.FusionMaterial || hint == HintMsg.SynchroMaterial || hint == HintMsg.XyzMaterial || hint == HintMsg.LinkMaterial || hint == HintMsg.DeattachFrom) allowedCards = FilterRouteProtected(allowedCards, min);   // 2026-11-02 (⑤): 루트 잔여 단계 카드를 코스트/소재에서 보호");
+                            sb.AppendLine("            if (hint == HintMsg.FusionMaterial || hint == HintMsg.SynchroMaterial || hint == HintMsg.XyzMaterial || hint == HintMsg.LinkMaterial || hint == HintMsg.DeattachFrom) allowedCards = FilterRouteProtected(allowedCards, min);   // 2026-11-02 (⑤): 루트 잔여 단계 카드를 **소재**에서 보호. ⚠ 릴리스/버리기는 제외(마큐라 릴리스처럼 루트가 요구하는 코스트가 있다)");
                     if (isSelectCard)
                     {
                         if (forbidTarget.Count > 0 || forbidNoTargetField.Count > 0 || forbidNoTargetCard.Count > 0 || forbidNoTargetEnemy.Count > 0)
@@ -2143,6 +2147,17 @@ namespace WindBotAIEditor.Services
                 sb.AppendLine("                return cards;");
                 sb.AppendLine("            }");
                 sb.AppendLine("            return keep;");
+                sb.AppendLine("        }");
+                sb.AppendLine();
+                // 2026-11-03: 후보가 **전부 내** 엑스트라 덱 몬스터인지 (릴리스 코스트 취소 판정)
+                //   2026-11-03 (22-09-23 무한루프): 상대의 엑시즈(No More Bets) 1장만 후보일 때도 취소해
+                //   소환이 무한 재시도(235회)됐다 → **내 카드(Controller == 0)만** 취소 대상으로 본다.
+                sb.AppendLine("        private int _releaseCancelTurn = -1;   // 릴리스 취소는 턴당 1회(무한 재시도 방지)");
+                sb.AppendLine("        private bool AllExtraDeckMonsters(IList<ClientCard> cards)");
+                sb.AppendLine("        {");
+                sb.AppendLine("            if (cards == null || cards.Count == 0) return false;");
+                sb.AppendLine("            for (int i = 0; i < cards.Count; i++) { if (cards[i].Controller != 0 || !IsExtraDeckMonster(cards[i])) return false; }");
+                sb.AppendLine("            return true;");
                 sb.AppendLine("        }");
                 sb.AppendLine();
                 // B-18: 제물 여력 검사 (IsExtraDeckMonster 재사용 — 중복 정의 금지)
@@ -3719,6 +3734,7 @@ namespace WindBotAIEditor.Services
             sb.AppendLine("        private int _routeProbeTurn = -1;  // 턴당 1회 Main 진단 로그");
             sb.AppendLine("        private bool RoutePending(int card, int type)");
             sb.AppendLine("        {");
+            sb.AppendLine("            if (Duel.Player != 0) return false;   // 2026-11-03: 루트 게이트는 **내 턴에만**(상대 턴 세트 함정/패트랩 차단 방지)");
             if (dbg)
             {
                 string probeArg = "0";
