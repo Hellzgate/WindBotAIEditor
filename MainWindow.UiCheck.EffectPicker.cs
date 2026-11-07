@@ -154,19 +154,26 @@ namespace WindBotAIEditor
             if (src.IndexOf("CountUnusedEffect(Enemy) <= 0", System.StringComparison.Ordinal) < 0) problems.Add("b53: enemyUnusedEffectCount 조건식이 없습니다");
             if (src.IndexOf("_usedEffectKeys.Clear()", System.StringComparison.Ordinal) < 0) problems.Add("b53: 새 턴 초기화가 없습니다");
 
-            // ② 그리드에 체크박스(SkipEffectUsed) 컬럼이 있는지
-            var colFound = false;
+            // ② 그리드에는 **필터 요약 열**이 있고, 실제 체크박스는 팝업(ChoiceFiltersWindow)에 있다 (2026-11-07)
+            var hasFilterCol = false;
             foreach (var col in GridChoices.Columns)
+                if (Convert.ToString(col.Header) == "필터") hasFilterCol = true;
+            if (!hasFilterCol) problems.Add("b53: ② 그리드에 '필터' 요약 컬럼이 없습니다");
+
+            var probeRule = new ChoiceRule { On = "SelectCard", SkipEffectUsed = true, OnlyEnemy = true };
+            if (probeRule.FilterSummary.IndexOf("사용됨", System.StringComparison.Ordinal) < 0 ||
+                probeRule.FilterSummary.IndexOf("상대", System.StringComparison.Ordinal) < 0)
+                problems.Add("b53: FilterSummary 요약이 필터 값을 반영하지 않습니다: " + probeRule.FilterSummary);
+
+            var filterWin = new ChoiceFiltersWindow(new ChoiceRule { On = "SelectCard" });
+            try
             {
-                var tc = col as DataGridTemplateColumn;
-                if (tc?.CellTemplate == null) continue;
-                var content = tc.CellTemplate.LoadContent() as DependencyObject;
-                var cb = content as System.Windows.Controls.CheckBox ?? FindChild<System.Windows.Controls.CheckBox>(content);
-                if (cb == null) continue;
-                var b = System.Windows.Data.BindingOperations.GetBinding(cb, System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty);
-                if (b?.Path?.Path == "SkipEffectUsed") colFound = true;
+                if (!filterWin.HasCheckBoxBinding("SkipEffectUsed"))
+                    problems.Add("b53: 필터 팝업에 SkipEffectUsed 체크박스 바인딩이 없습니다");
+                if (!filterWin.HasCheckBoxBinding("OnlyEnemy"))
+                    problems.Add("b53: 필터 팝업에 OnlyEnemy 체크박스 바인딩이 없습니다");
             }
-            if (!colFound) problems.Add("b53: ② 그리드에 '효과 사용' 체크박스 컬럼이 없습니다");
+            finally { filterWin.Close(); }
 
             // 2026-11-01: 체인 마지막 = 상대 필드 몬스터 조건 (뵐러/포영 발동 게이트)
             var p2 = new AiProfile();
@@ -811,7 +818,15 @@ namespace WindBotAIEditor
             {
                 if (BtnShowRoutedCode == null) { problems.Add("b74: BtnShowRoutedCode 없음"); return problems; }
                 CommitGrids();
-                var src = RuleCodeGen.Generate(_profile);
+                // 불러온 프로필에 루트가 없으면(예: 레이즈문 = 0벌) 검사가 무의미하게 실패한다 →
+                // 루트 1벌을 가진 **합성 프로필**로 코드젠을 검사한다.
+                var probe = new AiProfile();
+                var probeSet = new RouteSet { Name = "uicheck", IsDefault = true };
+                var probeStep = new RouteStep { Order = 0 };
+                probeStep.Options.Add(new RouteOption { Rank = 1, Card = 100458022, Action = "Summon" });
+                probeSet.Steps.Add(probeStep);
+                probe.Routes.Add(probeSet);
+                var src = RuleCodeGen.Generate(probe);
                 if (src.IndexOf("private void SelectRouteFirst", System.StringComparison.Ordinal) < 0)
                     problems.Add("b74: 생성 코드에 SelectRouteFirst 가 없습니다");
                 var w = new GeneratedCodeWindow("uicheck", src, "private void SelectRouteFirst");

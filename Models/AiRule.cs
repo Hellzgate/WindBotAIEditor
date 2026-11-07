@@ -513,42 +513,68 @@ namespace WindBotAIEditor.Models
                 if (value == null) return;
                 ResistantMode = value.Id;
                 Raise(nameof(EffectiveResistantMode));
+                Raise(nameof(FilterSummary));
             }
         }
 
-        /// <summary>
-        /// 2026-10-30: 후보에서 **효과가 무효된** 카드를 제외한다(`ClientCard.IsDisabled()`).
-        /// 실행기 73개에서 `IsDisabled` 349회 사용 → 실전 빈도 높음. 제외 후 후보가 `min` 미만이면 다음 규칙으로 넘어간다.
-        /// </summary>
-        public bool SkipDisabled { get; set; }
+        private bool _skipDisabled;
+        public bool SkipDisabled
+        {
+            get => _skipDisabled;
+            set { if (Set(ref _skipDisabled, value)) Raise(nameof(FilterSummary)); }
+        }
 
-        /// <summary>
-        /// 2026-10-30: 후보에서 **뒷면** 카드를 제외한다(`!c.IsFacedown()`).
-        /// 세트 마함·뒷면 몬스터를 대상으로 잡지 않게 한다. 제외 후 후보가 `min` 미만이면 다음 규칙으로 넘어간다.
-        /// </summary>
-        public bool SkipFaceDown { get; set; }
+        private bool _skipFaceDown;
+        public bool SkipFaceDown
+        {
+            get => _skipFaceDown;
+            set { if (Set(ref _skipFaceDown, value)) Raise(nameof(FilterSummary)); }
+        }
 
-        /// <summary>
-        /// 2026-10-30: **앞면 카드만** 남긴다(`c.IsFaceup()`). 앞면 몬스터/마함을 대상으로 하는 효과에 쓴다.
-        /// `SkipFaceDown` 과 동시에 켜면 뒷면 제외가 먼저 적용된다.
-        /// </summary>
-        public bool OnlyFaceUp { get; set; }
+        private bool _onlyFaceUp;
+        public bool OnlyFaceUp
+        {
+            get => _onlyFaceUp;
+            set { if (Set(ref _onlyFaceUp, value)) Raise(nameof(FilterSummary)); }
+        }
 
-        /// <summary>
-        /// 2026-11-01: **이번 턴 이미 효과를 발동한 상대 몬스터**를 후보에서 제외한다.
-        /// 뵐러(97268402)·무한포영(10045474)처럼 "지금 효과를 낼 수 있는 몬스터"를 대상으로 잡아야 하는 카드에서
-        /// 이미 효과를 쓴 몬스터에게 날아가는 낭비를 막는다.
-        /// 판정: 실행기가 `OnChaining` 에서 기록한 (카드ID|존) 목록을 `OnNewTurn` 에서 비운다.
-        /// 주의: 그 몬스터에 **남은 다른 효과**가 있으면 제외하는 것이 손해일 수 있다(규칙별로 켠다).
-        /// </summary>
-        public bool SkipEffectUsed { get; set; }
+        private bool _skipEffectUsed;
+        public bool SkipEffectUsed
+        {
+            get => _skipEffectUsed;
+            set { if (Set(ref _skipEffectUsed, value)) Raise(nameof(FilterSummary)); }
+        }
 
+        private bool _onlyEnemy;
+        public bool OnlyEnemy
+        {
+            get => _onlyEnemy;
+            set { if (Set(ref _onlyEnemy, value)) Raise(nameof(FilterSummary)); }
+        }
         /// <summary>
-        /// B-77 (2026-11-02): **상대(컨트롤러 != 0) 카드만** 후보로 남긴다.
-        /// 네필 어사일럼 e2 처럼 "상대 몹을 소재로 붙이는" 프롬프트에서 **내 카드를 쓰지 않게** 할 때 쓴다.
-        /// 필터 후 후보가 min 미만이면 그 규칙을 건너뛰고 다음 규칙/기본 폴백으로 간다.
+        /// 2026-11-07: ② 그리드 **필터 열** 요약 — 내성/무효/뒷면/앞면/사용됨/상대 중 켜진 것만 짧게.
+        /// (예전에는 6개 열을 각각 체크박스로 두어 표가 창보다 넓어졌다 → 한 열 + 팝업으로 접었다)
         /// </summary>
-        public bool OnlyEnemy { get; set; }
+        [JsonIgnore]
+        public string FilterSummary
+        {
+            get
+            {
+                var parts = new System.Collections.Generic.List<string>();
+                var mode = EffectiveResistantMode;
+                if (mode == "on") parts.Add("내성");
+                else if (mode == "off") parts.Add("내성무시");
+                if (SkipDisabled) parts.Add("무효");
+                if (SkipFaceDown) parts.Add("뒷면");
+                if (OnlyFaceUp) parts.Add("앞면");
+                if (SkipEffectUsed) parts.Add("사용됨");
+                if (OnlyEnemy) parts.Add("상대");
+                return parts.Count == 0 ? "—" : string.Join(" ", parts);
+            }
+        }
+
+        /// <summary>필터 팝업에서 바꾼 뒤 그리드 요약을 갱신한다.</summary>
+        public void NotifyFilters() => Raise(nameof(FilterSummary));
 
         /// <summary>
         /// B-25: 선택 힌트(<c>hint</c>)가 이 값일 때만 적용 (0 = 무관).

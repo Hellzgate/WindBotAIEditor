@@ -1,0 +1,47 @@
+<Window x:Class="WindBotAIEditor.ChoiceFiltersWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WindBotAIEditor"
+        Title="선택 규칙 필터" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextFg}"
+        FontFamily="Malgun Gothic" FontSize="13" UseLayoutRounding="True">
+    <StackPanel Margin="16">
+        <TextBlock x:Name="TxtHeader" FontWeight="SemiBold" FontSize="14" TextWrapping="Wrap" Margin="0,0,0,4"/>
+        <TextBlock Text="체크하면 그 후보를 걸러냅니다. 걸러낸 뒤 후보가 부족하면 이 규칙을 건너뜁니다."
+                   Foreground="{DynamicResource SubtleFg}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <CheckBox x:Name="ChkResistant" Margin="0,0,0,2"
+                  Content="내성 몹 제외 (대상·효과 보호)"
+                  ToolTip="대상 지정/효과 보호 몬스터를 후보에서 뺍니다. 오른쪽 콤보로 3상태(전역 따름/항상/안 함)를 고릅니다."/>
+        <ComboBox x:Name="CmbResistant" Style="{DynamicResource ThemedComboBox}" Margin="24,0,0,12"
+                  DisplayMemberPath="Label" Height="26"
+                  ToolTip="전역 따름 = ⚙ AI 설정의 '내성 몹 대상 제외(전체)' 값을 따릅니다"/>
+
+        <CheckBox x:Name="ChkDisabled" Margin="0,0,0,10"
+                  Content="무효된 카드 제외"
+                  ToolTip="이미 효과가 무효된 카드(ClientCard.IsDisabled)를 후보에서 뺍니다"/>
+        <CheckBox x:Name="ChkFaceDown" Margin="0,0,0,10"
+                  Content="뒷면 카드 제외"
+                  ToolTip="뒷면(세트) 카드를 후보에서 뺍니다"/>
+        <CheckBox x:Name="ChkFaceUp" Margin="0,0,0,10"
+                  Content="앞면 카드만"
+                  ToolTip="앞면 카드만 남깁니다. '뒷면 제외'와 함께 켜면 뒷면 제외가 먼저 적용됩니다"/>
+        <CheckBox x:Name="ChkEffectUsed" Margin="0,0,0,10"
+                  Content="이번 턴 효과를 쓴 몬스터 제외"
+                  ToolTip="이번 턴 이미 효과를 발동한 상대 몬스터를 뺍니다(뵐러·무한포영 낭비 방지)"/>
+        <CheckBox x:Name="ChkOnlyEnemy" Margin="0,0,0,14"
+                  Content="상대 카드만"
+                  ToolTip="상대(컨트롤러 != 0) 카드만 남깁니다 — 네필 e2 처럼 상대 몹만 소재로 쓸 때"/>
+
+        <Border Background="{DynamicResource SubtleBg}" BorderBrush="{DynamicResource BorderBrush2}"
+                BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,14">
+            <TextBlock x:Name="TxtSummary" FontSize="12" Foreground="{DynamicResource SubtleFg}" TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="BtnClear" Content="모두 끄기" Margin="0,0,8,0" Click="OnClear"/>
+            <Button Style="{DynamicResource PrimaryButton}" Content="닫기" IsDefault="True" IsCancel="True" MinWidth="80"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

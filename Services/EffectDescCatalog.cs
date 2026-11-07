@@ -249,7 +249,7 @@ namespace WindBotAIEditor.Services
         {
             // 2026-11-01: 목록을 **지우지 않고** 갱신한다 — Clear() 하면 콤보의 선택이 풀려 칸이 빈칸으로 보인다.
             if (Items.Count == 0 || Items[0].Value != -1)
-                Items.Insert(0, new EffectDescOption { Value = -1, Label = "(효과 없음 / 무관)" });
+                Items.Insert(0, new EffectDescOption { Value = -1, Label = "—" });   // 무관(효과번호 없음) — 표에서 반복되는 긴 문구를 줄인다
 
             foreach (var kv in _map.OrderBy(k => k.Key))
             {

@@ -926,6 +926,18 @@ namespace WindBotAIEditor
             OnChoiceSelected(sender, null);
         }
 
+        /// <summary>
+        /// 2026-11-07: ② 그리드 **필터 열** 클릭 → 내성/무효/뒷면/앞면/사용됨/상대를 한 창에서 설정.
+        /// (예전 6개 체크박스 열을 접어 표 폭을 줄였다. 값은 바인딩으로 즉시 반영된다)
+        /// </summary>
+        private void OnEditChoiceFilters(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChoiceRule rule) return;
+            var w = new ChoiceFiltersWindow(rule) { Owner = this };
+            w.ShowDialog();
+            rule.NotifyFilters();
+        }
+
         // ---- 선택 규칙의 조건 (B-6) ----
 
         private ChoiceRule? SelectedChoice => GridChoices.SelectedItem as ChoiceRule;
@@ -1929,6 +1941,15 @@ namespace WindBotAIEditor
 
         /// <summary>바깥 탭에 해당 헤더가 있는지</summary>
         public bool HasMainTab(string header) => MainTabIndex(header) >= 0;
+
+        /// <summary>--shot: 헤더로 최상위 탭을 선택한다(없으면 false).</summary>
+        public bool SelectMainTab(string header)
+        {
+            var i = MainTabIndex(header);
+            if (i < 0) return false;
+            Tabs.SelectedIndex = i;
+            return true;
+        }
 
         private int MainTabIndex(string header)
         {
@@ -3615,6 +3636,7 @@ namespace WindBotAIEditor
                 TxtDeck.Text = _project.ReadDeck(name);
                 var (m, x, s) = WindBotProject.CountDeck(TxtDeck.Text);
                 TxtDeckInfo.Text = $"{file} — 메인 {m} / 엑스트라 {x} / 사이드 {s}";
+                UpdateEmptyHints();
 
                 var engine = StripDeckName(file);
                 TxtEngineName.Text = engine;
@@ -3624,7 +3646,61 @@ namespace WindBotAIEditor
             catch (Exception ex) { Status("덱 읽기 실패: " + ex.Message); }
         }
 
-        private void OnDeckTextChanged(object sender, TextChangedEventArgs e) => RefreshDeckCards();
+        private void OnDeckTextChanged(object sender, TextChangedEventArgs e)
+        {
+            RefreshDeckCards();
+            UpdateEmptyHints();     // 2026-11-07: 덱 미선택 안내 / 검색 워터마크
+        }
+
+        /// <summary>
+        /// 2026-11-07: 빈 상태 안내 — 덱 텍스트가 비면 중앙 안내를, 검색어가 비면 검색 워터마크를 보여준다.
+        /// (데스크톱 앱은 빈 화면이 "고장"처럼 보여서, 무엇을 하면 되는지 화면 안에 적어 둔다)
+        /// </summary>
+        private void UpdateEmptyHints()
+        {
+            if (PnlDeckEmpty != null)
+                PnlDeckEmpty.Visibility = string.IsNullOrWhiteSpace(TxtDeck?.Text) ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtDeckCardFilterHint != null)
+                TxtDeckCardFilterHint.Visibility = string.IsNullOrEmpty(TxtDeckCardFilter?.Text) ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtBotFilterHint != null)
+                TxtBotFilterHint.Visibility = string.IsNullOrEmpty(TxtBotFilter?.Text) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ---- 봇 목록 검색 (2026-11-07) ----
+
+        private void OnBotFilterChanged(object sender, TextChangedEventArgs e)
+        {
+            UpdateEmptyHints();
+            ApplyBotFilter();
+        }
+
+        private void ApplyBotFilter()
+        {
+            if (GridBots == null || _bots == null) return;
+            var kw = (TxtBotFilter?.Text ?? "").Trim();
+            var view = System.Windows.Data.CollectionViewSource.GetDefaultView(_bots);
+            if (kw.Length == 0)
+            {
+                view.Filter = null;
+            }
+            else
+            {
+                view.Filter = o =>
+                {
+                    if (o is not BotEntry b) return false;
+                    return (b.Name ?? "").IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
+                        || (b.Deck ?? "").IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0
+                        || b.Difficulty.ToString().Contains(kw);
+                };
+            }
+            view.Refresh();
+            if (LblBotCount != null)
+            {
+                var shown = 0;
+                foreach (var _ in view) shown++;
+                LblBotCount.Text = kw.Length == 0 ? (_bots.Count + "개") : (shown + " / " + _bots.Count + "개");
+            }
+        }
 
         private void OnSaveDeck(object sender, RoutedEventArgs e)
         {
@@ -3747,7 +3823,11 @@ namespace WindBotAIEditor
 
         private List<DeckCardItem> _deckCardItems = new();
 
-        private void OnDeckCardFilterChanged(object sender, TextChangedEventArgs e) => RefreshDeckCards();
+        private void OnDeckCardFilterChanged(object sender, TextChangedEventArgs e)
+        {
+            RefreshDeckCards();
+            UpdateEmptyHints();
+        }
 
         private void RefreshDeckCards()
         {
@@ -3823,6 +3903,7 @@ namespace WindBotAIEditor
                 foreach (var b in _project.LoadBots()) _bots.Add(b);
             }
             catch (Exception ex) { Status("bots.json 로드 실패: " + ex.Message); }
+            ApplyBotFilter();
         }
 
         private void OnAddBot(object sender, RoutedEventArgs e)
@@ -4001,7 +4082,7 @@ namespace WindBotAIEditor
                 string area = CondAreaName(grid);
                 if (conds.Count == 0) { ShowCondPreview("", 0, area); return; }
                 string expr = RuleCodeGen.PreviewConditions(conds);
-                Status("조건식: " + expr);
+                ShowCondPreview(expr, conds.Count, area);   // 바에만 표시(상태줄 중복 제거)
                 ShowCondPreview(expr, conds.Count, area);
             }
             catch { /* 미리보기는 실패해도 무해 */ }

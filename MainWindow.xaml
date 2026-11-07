@@ -81,7 +81,7 @@
                 <Grid Margin="8">
                     <!-- 덱 목록 | 스플리터 | 덱 편집(남는 폭 전부) — B-7: 엔진/규칙 열은 ⚙ AI 설정 탭으로 분리 -->
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="240" MinWidth="200"/>
+                        <ColumnDefinition Width="300" MinWidth="220"/>
                         <ColumnDefinition Width="6"/>
                         <ColumnDefinition Width="*" MinWidth="420"/>
                     </Grid.ColumnDefinitions>
@@ -129,9 +129,20 @@
                             <Button Content="이름→ID" Margin="4,0,0,0" Click="OnConvertNamesToIds"/>
                         </StackPanel>
 
-                        <TextBox Grid.Row="2" x:Name="TxtDeck" AcceptsReturn="True" AcceptsTab="True"
-                                 FontFamily="Consolas" FontSize="13.5" TextChanged="OnDeckTextChanged"
-                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                        <Grid Grid.Row="2">
+                          <TextBox x:Name="TxtDeck" AcceptsReturn="True" AcceptsTab="True"
+                          FontFamily="Consolas" FontSize="13.5" TextChanged="OnDeckTextChanged"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                          <!-- 빈 상태 안내 (덱 미선택) — 2026-11-07 -->
+                          <StackPanel x:Name="PnlDeckEmpty" IsHitTestVisible="False" VerticalAlignment="Center"
+                          HorizontalAlignment="Center" Margin="24">
+                              <TextBlock Text="덱을 선택하세요" FontSize="16" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource SubtleFg}" HorizontalAlignment="Center"/>
+                              <TextBlock Text="왼쪽 목록에서 덱을 고르거나, [새 덱] / [가져오기] 로 시작하세요."
+                                         Foreground="{DynamicResource HintFg}" FontSize="12" Margin="0,6,0,0"
+                                         HorizontalAlignment="Center" TextWrapping="Wrap"/>
+                          </StackPanel>
+                        </Grid>
 
                         <GridSplitter Grid.Row="3" Height="6" HorizontalAlignment="Stretch" Background="Transparent"
                                       ResizeBehavior="PreviousAndNext" ResizeDirection="Rows" Cursor="SizeNS"/>
@@ -146,7 +157,12 @@
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" x:Name="TxtDeckCardFilter" Padding="3" TextChanged="OnDeckCardFilterChanged"/>
+                                    <Grid Grid.Column="0">
+                                        <TextBox x:Name="TxtDeckCardFilter" Padding="3" TextChanged="OnDeckCardFilterChanged"/>
+                                        <TextBlock x:Name="TxtDeckCardFilterHint" Text="카드 이름으로 검색" IsHitTestVisible="False"
+                                                   Foreground="{DynamicResource HintFg}" FontSize="12" Margin="6,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
                                     <Button Grid.Column="1" Content="1장 빼기" Margin="6,0,0,0" Click="OnRemoveDeckCard"/>
                                     <TextBlock Grid.Column="2" x:Name="LblDeckCardCount" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SubtleFg}" FontSize="11"/>
                                 </Grid>
@@ -233,15 +249,16 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" MinWidth="360"/>
-                                        <ColumnDefinition Width="10"/>
-                                        <ColumnDefinition Width="*" MinWidth="360"/>
+                                        <ColumnDefinition Width="14"/>
+                                          <ColumnDefinition Width="*" MinWidth="360"/>
                                     </Grid.ColumnDefinitions>
     
                                     <!-- 왼쪽: 엔진 / 봇 -->
-                                    <Border Grid.Column="0" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
-                                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <Border Grid.Column="0" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" CornerRadius="6" Padding="12,10">
                                         <StackPanel>
-                                            <TextBlock Text="엔진 / 봇" FontWeight="Bold" Margin="0,0,0,6"/>
+                                            <Border Background="{DynamicResource SectionHeadBg}" CornerRadius="3" Padding="8,4" Margin="0,0,0,8">
+                                                <TextBlock Text="엔진 / 봇" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource SubtleFg}"/>
+                                            </Border>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
@@ -485,10 +502,11 @@
                                     </Border>
     
                                     <!-- 오른쪽: 동작 세부 -->
-                                    <Border Grid.Column="2" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}"
-                                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                                    <Border Grid.Column="2" Background="{DynamicResource CardBg}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" CornerRadius="6" Padding="12,10">
                                         <StackPanel>
-                                            <TextBlock Text="동작 세부" FontWeight="Bold" Margin="0,0,0,6"/>
+                                            <Border Background="{DynamicResource SectionHeadBg}" CornerRadius="3" Padding="8,4" Margin="0,0,0,8">
+                                                <TextBlock Text="동작 세부" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource SubtleFg}"/>
+                                            </Border>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
@@ -678,7 +696,7 @@
 
                                 <DataGrid Grid.Row="3" x:Name="GridConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="연결" Width="54">
+                                        <DataGridTemplateColumn Header="연결" Width="66">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <Grid>
@@ -857,7 +875,10 @@
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="카드ID" Binding="{Binding Card, UpdateSourceTrigger=PropertyChanged}" Width="74"/>
                                         <DataGridTextColumn Header="발동카드ID" Binding="{Binding WhenCard, UpdateSourceTrigger=PropertyChanged}" Width="82"/>
-                                        <DataGridTemplateColumn Header="발동카드명 (이름으로 검색)" Width="*" MinWidth="150">
+                                        <DataGridTemplateColumn Width="*" MinWidth="150">
+                                    <DataGridTemplateColumn.Header>
+                                        <TextBlock Text="발동카드 이름" ToolTip="발동카드 이름으로 검색 (ID 를 직접 넣어도 됨)"/>
+                                    </DataGridTemplateColumn.Header>
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <controls:CardNameBox CardId="{Binding WhenCard, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -877,63 +898,17 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                           </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="내성 제외" Width="104">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
-                                                              ItemsSource="{Binding Source={x:Static local:MainWindow.ResistantModes}}"
-                                                              SelectedItem="{Binding ResistantModeName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              DisplayMemberPath="Label"
-                                                              ToolTip="내성 몹(대상/효과 보호) 제외 — 3상태. [전역 설정 따름] 은 ⚙ AI 설정의 '내성 몹 대상 제외(전체)' 값을 따릅니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-01)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="무효 제외" Width="76">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding SkipDisabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="후보에서 이미 효과가 무효된 카드(ClientCard.IsDisabled())를 제외합니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-10-30 신규)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="뒷면 제외" Width="76">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding SkipFaceDown, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="후보에서 뒷면 카드(ClientCard.IsFacedown())를 제외합니다. 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-10-30 신규)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="앞면만" Width="68">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding OnlyFaceUp, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="앞면 카드(ClientCard.IsFaceup())만 남깁니다. '뒷면 제외'를 같이 켜면 뒷면 제외가 먼저 적용됩니다 (2026-10-30 신규)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="효과 사용" Width="84">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding SkipEffectUsed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="이번 턴 이미 효과를 발동한 상대 몬스터를 후보에서 제외합니다 (뵐러·무한포영을 아껴 쓴다). 제외 후 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-01 신규)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="상대만" Width="70">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox IsChecked="{Binding OnlyEnemy, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                              ToolTip="상대(컨트롤러 != 0) 카드만 후보로 남깁니다 — 네필 e2 처럼 '상대 몹만 소재로' 쓸 때. 남은 후보가 부족하면 다음 규칙으로 넘어갑니다 (2026-11-02 신규)"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Y/N" Binding="{Binding YesNo, UpdateSourceTrigger=PropertyChanged}" Width="44"/>
+                                        <DataGridTemplateColumn Header="필터" Width="150">
+                                                  <DataGridTemplateColumn.CellTemplate>
+                                                      <DataTemplate>
+                                                          <Button Style="{DynamicResource GridCellButton}"
+                                                                  Content="{Binding FilterSummary}"
+                                                                  Click="OnEditChoiceFilters"
+                                                                  ToolTip="내성 / 무효 / 뒷면 / 앞면 / 사용됨 / 상대 — 눌러서 켜고 끕니다 (2026-11-07: 6개 열을 한 열로 접음)"/>
+                                                      </DataTemplate>
+                                                  </DataGridTemplateColumn.CellTemplate>
+                                              </DataGridTemplateColumn>
+                                              <DataGridTextColumn Header="Y/N" Binding="{Binding YesNo, UpdateSourceTrigger=PropertyChanged}" Width="44"/>
                                         <DataGridTemplateColumn Header="옵션" Width="78">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
@@ -1037,7 +1012,7 @@
 
                                 <DataGrid Grid.Row="3" x:Name="GridChoiceConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="연결" Width="54">
+                                        <DataGridTemplateColumn Header="연결" Width="66">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <Grid>
@@ -1226,7 +1201,7 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="금지 행동" Width="186">
+                                        <DataGridTemplateColumn Header="금지 행동" Width="170">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <ComboBox Style="{DynamicResource ThemedComboBox}" ItemsSource="{Binding Source={x:Static local:MainWindow.ForbidActions}}"
@@ -1236,7 +1211,7 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Header="효과" Width="170">
+                                        <DataGridTemplateColumn Header="효과" Width="140">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <ComboBox Style="{DynamicResource ThemedComboBox}" Height="24"
@@ -1248,7 +1223,7 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                          <DataGridTemplateColumn Header="테마 (일반소환·세트 금지)" Width="160">
+                                          <DataGridTemplateColumn Header="테마 금지" Width="120">
                                               <DataGridTemplateColumn.CellTemplate>
                                                   <DataTemplate>
                                                       <controls:OptionSearchBox x:Name="BoxForbidTheme"
@@ -1333,7 +1308,7 @@
 
                                 <DataGrid Grid.Row="3" x:Name="GridForbidConds" SelectionChanged="OnCondGridPreview" CurrentCellChanged="OnCondGridPreview">
                                     <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="연결" Width="54">
+                                        <DataGridTemplateColumn Header="연결" Width="66">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <Grid>
@@ -1500,7 +1475,7 @@
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="그룹" Binding="{Binding Group, UpdateSourceTrigger=PropertyChanged}" Width="46"/>
-                                        <DataGridTemplateColumn Header="연결" Width="54">
+                                        <DataGridTemplateColumn Header="연결" Width="66">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <Grid>
@@ -1833,6 +1808,19 @@
                     <DockPanel Grid.Column="0">
                         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" Foreground="{DynamicResource SubtleFg}"
                                    Text="bots.json — EDOPro 로비의 'AI 리스트'에 표시되는 항목입니다."/>
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0">
+                                <TextBox x:Name="TxtBotFilter" TextChanged="OnBotFilterChanged" ToolTip="이름·덱·난이도로 검색 (부분 일치)"/>
+                                <TextBlock x:Name="TxtBotFilterHint" Text="이름 · 덱 검색" IsHitTestVisible="False"
+                                           Foreground="{DynamicResource HintFg}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
+                            <TextBlock Grid.Column="1" x:Name="LblBotCount" VerticalAlignment="Center" Margin="10,0,0,0"
+                                       Foreground="{DynamicResource SubtleFg}" FontSize="12"/>
+                        </Grid>
                         <DataGrid x:Name="GridBots" SelectionMode="Single">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="이름 (로비 표시)" Binding="{Binding Name}" Width="2*"/>

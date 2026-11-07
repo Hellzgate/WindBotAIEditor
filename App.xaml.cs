@@ -113,6 +113,14 @@ public partial class App : Application
             return;
         }
 
+        // 창을 띄우지 않고 화면을 PNG 로 저장(디자인 확인용): --shot <폴더|파일.png> [--size 1560x1000] [--profile x.json]
+        if (e.Args.Length >= 2 && e.Args[0] == "--shot")
+        {
+            int code = RunShot(e.Args);
+            Shutdown(code);
+            return;
+        }
+
         // 프리릴리즈(pre) → 정규 카드 ID 검사: WindBotAIEditor.exe --prerelease <EDOPro폴더|rules.json|*.ydk> [--convert] [--edopro <폴더>] [--limit N]
         if (e.Args.Length >= 2 && e.Args[0] == "--prerelease")
         {

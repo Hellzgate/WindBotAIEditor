@@ -15,6 +15,16 @@
     <SolidColorBrush x:Key="AccentBg" Color="#2F5D3A"/>
     <SolidColorBrush x:Key="AccentFg" Color="#EAF7EE"/>
     <SolidColorBrush x:Key="SelectionBg" Color="#2F4F6F"/>
+    <!-- 디자인 토큰(색) — hover/포커스/강조/위험 -->
+    <SolidColorBrush x:Key="HoverBg" Color="#2E3238"/>
+    <SolidColorBrush x:Key="InputBorder" Color="#54545F"/>
+    <SolidColorBrush x:Key="SectionHeadBg" Color="#2A2D33"/>
+    <SolidColorBrush x:Key="AccentBar" Color="#4C8DFF"/>
+    <SolidColorBrush x:Key="DangerBg" Color="#7A2323"/>
+    <SolidColorBrush x:Key="DangerFg" Color="#FFE6E6"/>
+    <SolidColorBrush x:Key="FocusRing" Color="#5AA9FF"/>
+    <SolidColorBrush x:Key="HoverOverlay" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="PressOverlay" Color="#26FFFFFF"/>
     <!-- ⑤ 트랙 토글: 선택된 강조 배경(선공 파랑 / 후공 주황) 위의 글자색 -->
     <SolidColorBrush x:Key="RouteTrackOnFg" Color="#FFFFFF"/>
 </ResourceDictionary>

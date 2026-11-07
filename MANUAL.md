@@ -230,7 +230,7 @@ EDOPro의 AI(WindBot Ignite)는 **덱마다 전용 실행기(DLL)** 가 필요�
 | **발동카드ID / 발동카드명** | 그 카드의 효과로 인한 선택일 때만 |
 | **최대선택** | 프롬프트의 `max` 값으로 구분 |
 | **힌트** | 프롬프트의 `hint` 값으로 구분 (예: 묘지 효과 509) |
-| **내성 제외 / 무효 제외 / 뒷면 제외 / 앞면만 / 상대만** | 후보에서 **대상 불가·내성 몹**, **효과 무효된 카드**, **뒷면 카드**를 빼거나 **앞면만**·**상대 카드만** 남김 (제외 후 후보가 부족하면 다음 규칙으로). `상대만` = 내 카드를 소재/대상으로 쓰지 않게 |
+| **필터** | 칸을 누르면 **필터 창**이 열립니다 — **내성 몹 · 무효된 카드 · 뒷면 · 앞면만 · 이번 턴 효과 사용 · 상대만** 을 한 번에 켜고 끕니다. 표에는 켜진 것만 `내성 무효` 처럼 요약됩니다 (제외 후 후보가 부족하면 다음 규칙으로). `상대만` = 내 카드를 소재/대상으로 쓰지 않게 |
 | **Y/N / 옵션 / 옵션desc** | 예·아니오 / 옵션 인덱스 / 옵션 설명 문자열 |
 | **테마 (우선) / 몬스터만 / 제외 카드** | `테마 카드 우선` 정책용 |
 | **조건** | 이 규칙의 발동 조건 (①③과 동일 DSL) |
@@ -483,6 +483,7 @@ WindBotAIEditor.exe --export <봇이름> <out.zip> <WindBot폴더>  봇 패키�
 WindBotAIEditor.exe --decktest <ydk>                        덱 검사
 WindBotAIEditor.exe --routetest <rules.json>                루트 왕복 검사
 WindBotAIEditor.exe --uicheck [rules.json]                  UI/컨트롤 점검
+WindBotAIEditor.exe --shot <폴더|파일.png> [--size 1560x1000] [--profile r.json]  화면 PNG 저장(창 안 뜸)
 WindBotAIEditor.exe --dbscan <EDOPro폴더>                   cdb/문자열 점검
 WindBotAIEditor.exe --prerelease <경로> [--convert]         프리릴리즈 확인/변환
 ```
