@@ -12,8 +12,8 @@
     <SolidColorBrush x:Key="GridHeaderBg" Color="#33363B"/>
     <SolidColorBrush x:Key="GridAltBg" Color="#2A2A2A"/>
     <SolidColorBrush x:Key="GridLine" Color="#3A3A3A"/>
-    <SolidColorBrush x:Key="AccentBg" Color="#2F5D3A"/>
-    <SolidColorBrush x:Key="AccentFg" Color="#EAF7EE"/>
+    <SolidColorBrush x:Key="AccentBg" Color="#264F86"/>
+    <SolidColorBrush x:Key="AccentFg" Color="#EAF2FF"/>
     <SolidColorBrush x:Key="SelectionBg" Color="#2F4F6F"/>
     <!-- 디자인 토큰(색) — hover/포커스/강조/위험 -->
     <SolidColorBrush x:Key="HoverBg" Color="#2E3238"/>

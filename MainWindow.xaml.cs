@@ -3664,6 +3664,8 @@ namespace WindBotAIEditor
                 TxtDeckCardFilterHint.Visibility = string.IsNullOrEmpty(TxtDeckCardFilter?.Text) ? Visibility.Visible : Visibility.Collapsed;
             if (TxtBotFilterHint != null)
                 TxtBotFilterHint.Visibility = string.IsNullOrEmpty(TxtBotFilter?.Text) ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtSettingsSearchHint != null)
+                TxtSettingsSearchHint.Visibility = string.IsNullOrEmpty(TxtSettingsSearch?.Text) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // ---- 봇 목록 검색 (2026-11-07) ----

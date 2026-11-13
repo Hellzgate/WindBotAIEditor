@@ -68,6 +68,28 @@ namespace WindBotAIEditor.Services
 
         public void Dispose() => Close();
 
+        /// <summary>같은 카드 ID 의 **모든 cdb 이름**(한국어·영문 등). 이미지 검색 폴백에 쓴다(2026-11-08).</summary>
+        public IReadOnlyList<string> NamesOf(int id)
+        {
+            var list = new List<string>();
+            if (id <= 0) return list;
+            foreach (var conn in _conns)
+            {
+                try
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT name FROM texts WHERE id=$id LIMIT 1";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    var o = cmd.ExecuteScalar();
+                    if (o == null || o == DBNull.Value) continue;
+                    string n = Convert.ToString(o) ?? "";
+                    if (n.Length > 0 && !list.Contains(n)) list.Add(n);
+                }
+                catch { }
+            }
+            return list;
+        }
+
         public string NameOf(int id)
         {
             if (id <= 0) return "";

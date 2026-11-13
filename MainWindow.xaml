@@ -240,6 +240,8 @@
                                          Style="{DynamicResource ThemedTextBox}"
                                          ToolTip="설정 항목 검색(이름·툴팁). 입력하면 설정 카드가 자동으로 펼쳐지고 해당 항목만 남습니다. Esc = 지우기"
                                          TextChanged="OnSettingsSearchChanged" KeyDown="OnSettingsSearchKeyDown"/>
+                                <TextBlock x:Name="TxtSettingsSearchHint" Text="설정 검색" Margin="22,0,0,0" VerticalAlignment="Center"
+                                           FontSize="11" Foreground="{DynamicResource HintFg}" IsHitTestVisible="False"/>
                                 <TextBlock x:Name="TxtSettingsSearchInfo" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="11"
                                            Foreground="{DynamicResource HintFg}"/>
                             </DockPanel>
@@ -541,7 +543,7 @@
                     <CheckBox x:Name="ChkShowPreErrata" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="에라타 전 카드(이름에 (Pre-Errata))를 카드 검색에 표시합니다. EDOPro 에서 별도 카드/스크립트라 쓰지 않으면 숨기는 게 안전합니다"
                               Checked="OnShowPreErrataChanged" Unchecked="OnShowPreErrataChanged">
-                        <TextBlock Text="에라타 전 카드도 검색에 표시 (기본: 숨김)" TextWrapping="Wrap"/>
+                        <TextBlock Text="에라타 전 카드도 검색에 표시" TextWrapping="Wrap" ToolTip="기본값: 숨김"/>
                     </CheckBox>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <TextBlock Text="기본 표시형식" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -554,47 +556,47 @@
                     <CheckBox x:Name="ChkLinkPlace" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="N-5: 소환할 존을 고를 때 상대 링크 몬스터가 링크 중인 존을 피하고, 내 링크 존을 선호합니다 (기본: 꺼짐 / 링크 덱이 아니면 효과 없음)"
                               Checked="OnLinkPlaceChanged" Unchecked="OnLinkPlaceChanged">
-                        <TextBlock Text="링크 마커 기반 존 선택 (기본: 꺼짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="링크 마커 기반 존 선택" TextWrapping="Wrap" ToolTip="기본값: 꺼짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkRouteAuthoritative" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="B-73: ⑤ 전개 루트를 '권장 순서'가 아니라 실제 순서로 강제합니다. 선택된 루트에 나오는 카드는 그 단계에 도달하기 전에는 ① 행동으로 나가지 못합니다(루트에 없는 카드·전개 종료 후에는 자유). 루트가 없으면 효과 없음 (2026-11-02)"
                               Checked="OnRouteAuthoritativeChanged" Unchecked="OnRouteAuthoritativeChanged">
-                        <TextBlock Text="⑤ 루트 순서 강제 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="⑤ 루트 순서 강제" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkAttackOnlyWinnable" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="모든 상대를 비교해 이길 수 있는(내 공격력 &gt; 상대 공격력/수비력) 대상이 하나도 없으면 배틀 페이즈를 종료합니다. 이길 수 있으면 가장 위협적인 상대를 가장 약한 내 몬스터로 공격합니다"
                               Checked="OnAttackOnlyWinnableChanged" Unchecked="OnAttackOnlyWinnableChanged">
-                        <TextBlock Text="이길 수 없으면 공격하지 않음 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="이길 수 없으면 공격하지 않음" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkSkipResistantGlobal" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="② 선택 규칙의 기본값 — 대상 선택 전에 내성 몹(대상/효과 보호: IsMonsterInvincible / IsShouldNotBeTarget / IsShouldNotBeMonsterTarget / IsShouldNotBeSpellTrapTarget)을 후보에서 제외합니다. 규칙별 [내성 제외] 를 [제외 안 함] 으로 두면 그 규칙만 무시합니다 (2026-11-01)"
                               Checked="OnSkipResistantGlobalChanged" Unchecked="OnSkipResistantGlobalChanged">
-                        <TextBlock Text="내성 몹 대상 제외 — 전체 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="내성 몹 대상 제외 — 전체" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkSkipDestructImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="파괴 선택(hint=Destroy)일 때 '파괴되지 않는 카드'를 후보에서 제외합니다. WindBot 내장 파괴불가 목록 + [파괴 내성 카드] 목록을 봅니다. 전부 파괴 불가면 원래 목록을 씁니다 (2026-11-01)"
                               Checked="OnSkipDestructImmuneChanged" Unchecked="OnSkipDestructImmuneChanged">
-                        <TextBlock Text="파괴 선택에서 파괴 내성 카드 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="파괴 선택에서 파괴 내성 카드 제외" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkSkipEffectImmune" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="② 선택 규칙의 기본값 — '효과를 받지 않는 카드'(예: 붉은 눈의 초월흑룡)를 대상 후보에서 제외합니다. **릴리스(hint=Release)는 제외하지 않습니다**(제물로는 쓸 수 있음). 목록이 비어 있으면 아무 동작도 하지 않습니다 (2026-11-02)"
                               Checked="OnSkipEffectImmuneChanged" Unchecked="OnSkipEffectImmuneChanged">
-                        <TextBlock Text="효과 면역 카드 대상 제외 — 릴리스 제외 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="효과 면역 카드 대상 제외 — 릴리스 제외" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkSkipEffectImmuneNegate" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="[무효화 카드] 목록(뵐러·포영)이 [효과 면역 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 대상 후보가 그 카드 하나뿐(n=1)일 때도 카드를 아낍니다. 목록에 없는 카드(노모어벳 등)는 막지 않습니다 (2026-11-02)"
                               Checked="OnSkipEffectImmuneNegateChanged" Unchecked="OnSkipEffectImmuneNegateChanged">
-                        <TextBlock Text="무효화 카드는 효과 면역 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="무효화 카드는 효과 면역 카드에 체인 금지" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkSkipDestructImmuneDestroy" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="[파괴 카드] 목록(유령토끼 등)이 [파괴 내성 카드] 의 효과에 체인하는 것을 **발동 단계에서** 막습니다. 'Cannot be destroyed by card effects' 몬스터에 유령토끼를 쓰는 낭비를 막습니다 (2026-11-02)"
                               Checked="OnSkipDestructImmuneDestroyChanged" Unchecked="OnSkipDestructImmuneDestroyChanged">
-                        <TextBlock Text="파괴 카드는 파괴 내성 카드에 체인 금지 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="파괴 카드는 파괴 내성 카드에 체인 금지" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                     <CheckBox x:Name="ChkAndroidSafe" IsChecked="True" Margin="0,8,0,0" VerticalAlignment="Center"
                               ToolTip="Windows/Android **둘 다** 같은 DLL 로 돌아가야 하므로, 안드로이드 트리밍 BCL 에 없는 API(File.ReadAllText · Path.GetTempPath · LINQ Any/OrderBy/FirstOrDefault 등)가 생성 코드에 있으면 [생성 + 컴파일] 을 중단합니다 (2026-11-02)"
                               Checked="OnAndroidSafeChanged" Unchecked="OnAndroidSafeChanged">
-                        <TextBlock Text="Android 안전 검사 (기본: 켜짐)" TextWrapping="Wrap"/>
+                        <TextBlock Text="Android 안전 검사" TextWrapping="Wrap" ToolTip="기본값: 켜짐"/>
                     </CheckBox>
                                             <TextBlock Text="소환 존 · 표시 형식 · 금지 세부는 ①③ 탭의 각 규칙 행에서 지정합니다 (전역 설정 없음)"
                                                        Foreground="{DynamicResource HintFg}" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
@@ -625,7 +627,7 @@
                                     <Button Content="효과번호 갱신" Margin="8,0,0,0" Click="OnRefreshEffectDescs" ToolTip="B-45: 규칙에 쓰인 카드의 Lua(SetDescription) + duel-log 관측값으로 효과번호 후보를 다시 모읍니다 (5분마다 자동)"/>
                                     <Button x:Name="BtnRawBody" Content="원본 코드" Margin="8,0,0,0" Click="OnOpenRawBody"
                                             ToolTip="선택한 행의 rawBody(포팅 원본 C# 본문)를 보고 고칩니다 — [검증]을 통과해야 저장됩니다 (2026-11-02)"/>
-                                    <TextBlock Text="같은 카드에 규칙을 여러 개 두면 우선순위 순서로 조건을 검사합니다 (첫 번째로 참인 행동만 실행)" Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                    <TextBlock Text="우선순위 순서로 검사 — 첫 번째로 참인 행동만 실행" ToolTip="같은 카드에 규칙을 여러 개 두면 우선순위 순서로 조건을 검사합니다 (첫 번째로 참인 행동만 실행)" Foreground="{DynamicResource HintFg}" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </DockPanel>
 
                                 <DataGrid Grid.Row="1" x:Name="GridActions" SelectionChanged="OnActionSelected" MouseDoubleClick="OnActionRowDoubleClick">
@@ -685,6 +687,22 @@
                                         <DataGridTextColumn Header="메모" Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="70"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                    <TextBlock Grid.Row="1" Text="규칙이 없습니다 — 위의 [추가] 로 시작하세요" IsHitTestVisible="False" FontSize="12">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Setter Property="HorizontalAlignment" Value="Center"/>
+                                                <Setter Property="VerticalAlignment" Value="Center"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource HintFg}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasItems, ElementName=GridActions}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+
 
                                 <DockPanel Grid.Row="2" Margin="0,8,0,4">
                                     <TextBlock x:Name="TxtCondHeader" Text="조건 — 모두 만족" FontWeight="Bold" VerticalAlignment="Center"/>
@@ -999,6 +1017,22 @@
                                         </DataGridTemplateColumn>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                    <TextBlock Grid.Row="1" Text="선택 규칙이 없습니다 — ②는 위에서부터 조건을 검사합니다" IsHitTestVisible="False" FontSize="12">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Setter Property="HorizontalAlignment" Value="Center"/>
+                                                <Setter Property="VerticalAlignment" Value="Center"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource HintFg}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasItems, ElementName=GridChoices}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+
 
                                 <DockPanel Grid.Row="2" Margin="0,8,0,4">
                                     <TextBlock Text="조건 — 모두 만족" FontWeight="Bold" VerticalAlignment="Center"/>
@@ -1296,6 +1330,22 @@
                                         <DataGridTextColumn Header="메모" Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="70"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                    <TextBlock Grid.Row="1" Text="금지 규칙이 없습니다 — 발동을 막을 카드를 추가하세요" IsHitTestVisible="False" FontSize="12">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Setter Property="HorizontalAlignment" Value="Center"/>
+                                                <Setter Property="VerticalAlignment" Value="Center"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource HintFg}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasItems, ElementName=GridForbids}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+
 
                                 <DockPanel Grid.Row="2" Margin="0,8,0,4">
                                     <TextBlock Text="조건 — [조건 해석]으로 예외/조건부 금지 · 값 0 = 전체 · 이벤트 조건은 [대상(누가)] 열" FontWeight="Bold" VerticalAlignment="Center"/>
